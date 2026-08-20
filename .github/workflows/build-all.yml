@@ -1,1 +1,69 @@
+name: Build All Zenith Linux Tools
 
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-nim-tools:
+    name: Build Nim tools (zesh, cr, dl, mk)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Nim
+        uses: jiro4989/setup-nim-action@v2
+        with:
+          nim-version: '2.0.x'
+
+      - name: Build
+        run: nimble build -d:release -y
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nim-tools
+          path: |
+            zesh/zesh
+            cr/cr
+            dl/dl
+            mk/mk
+
+  build-crystal-tools:
+    name: Build Crystal tools (about, ow, gr, pm)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Crystal
+        uses: crystal-lang/install-crystal@v1
+
+      - name: Install dependencies
+        run: shards install
+
+      - name: Build
+        run: shards build --release
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: crystal-tools
+          path: bin/
+
+  verify-orchestrator:
+    name: Weryfikacja build.janet
+    runs-on: ubuntu-latest
+    needs: [build-nim-tools, build-crystal-tools]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Janet
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y janet
+
+      - name: Sprawdź składnię build.janet
+        run: janet -c build.janet /dev/null
