@@ -1,1 +1,20 @@
+name: zenith-tools
+version: 1.0.0
 
+authors:
+  - Zenith Linux Developers
+
+crystal: ">= 1.10.0"
+
+license: Apache-2.0
+
+# Cztery narzędzia napisane w Crystalu, każde jako osobny binarny target.
+targets:
+  about:
+    main: about/src/about.cr
+  ow:
+    main: ow/src/ow.cr
+  gr:
+    main: gr/src/gr.cr
+  pm:
+    main: pm/src/pm.cr
