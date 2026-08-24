@@ -1,108 +1,88 @@
-import std/[os, strutils, terminal, parseopt, times]
+require "option_parser"
+require "file_utils"
 
-const VERSION = "1.0.0"
+VERSION = "1.0.0"
 
-let trashDir = getHomeDir() / ".zenith" / "trash"
+trash_dir = File.join(ENV["HOME"]? || "/root", ".zenith", "trash")
 
-proc printUsage() =
-  echo "dl — nowoczesna alternatywa dla rm (Zenith Linux)"
-  echo ""
-  echo "Użycie: dl [opcje] PLIK/KATALOG..."
-  echo ""
-  echo "Opcje:"
-  echo "  -r, --recursive      usuwaj katalogi rekurencyjnie"
-  echo "  -f, --force          nie pytaj, ignoruj brakujące pliki"
-  echo "  -i, --interactive    pytaj przed każdym usunięciem"
-  echo "      --permanent      usuń trwale, z pominięciem kosza"
-  echo "  -v, --verbose        wypisuj usuwane pliki"
-  echo "  -h, --help           pokaż tę pomoc"
-  echo "      --version        pokaż wersję"
-  echo ""
-  echo "Domyślnie pliki trafiają do kosza: " & trashDir
+recursive   = false
+force       = false
+interactive = false
+permanent   = false
+verbose     = false
+targets     = [] of String
 
-var
-  recursive = false
-  force = false
-  interactive = false
-  permanent = false
-  verbose = false
-  targets: seq[string] = @[]
+parser = OptionParser.new do |p|
+  p.banner = "dl — nowoczesna alternatywa dla rm (Zenith Linux)\n\nUżycie: dl [opcje] PLIK/KATALOG...\n\nDomyślnie pliki trafiają do kosza: #{trash_dir}"
+  p.on("-r", "--recursive", "usuwaj katalogi rekurencyjnie") { recursive = true }
+  p.on("-f", "--force", "nie pytaj, ignoruj brakujące pliki") { force = true }
+  p.on("-i", "--interactive", "pytaj przed każdym usunięciem") { interactive = true }
+  p.on("--permanent", "usuń trwale, z pominięciem kosza") { permanent = true }
+  p.on("-v", "--verbose", "wypisuj usuwane pliki") { verbose = true }
+  p.on("-h", "--help", "pokaż tę pomoc") { puts p; exit 0 }
+  p.on("--version", "pokaż wersję programu dl") { puts "dl #{VERSION}"; exit 0 }
+  p.unknown_args { |args| targets.concat(args) }
+end
+parser.parse
 
-var p = initOptParser()
-for kind, key, val in p.getopt():
-  case kind
-  of cmdArgument: targets.add(key)
-  of cmdLongOption, cmdShortOption:
-    case key
-    of "r", "recursive": recursive = true
-    of "f", "force": force = true
-    of "i", "interactive": interactive = true
-    of "permanent": permanent = true
-    of "v", "verbose": verbose = true
-    of "h", "help":
-      printUsage()
-      quit(0)
-    of "version":
-      echo "dl " & VERSION
-      quit(0)
-    else: discard
-  of cmdEnd: discard
+if targets.empty?
+  STDERR.puts "dl: brak argumentu — podaj plik lub katalog"
+  exit 1
+end
 
-if targets.len == 0:
-  stderr.styledWriteLine(fgRed, "dl: brak argumentu — podaj plik lub katalog")
-  quit(1)
+Dir.mkdir_p(trash_dir) if !permanent && !Dir.exists?(trash_dir)
 
-if not permanent and not dirExists(trashDir):
-  createDir(trashDir)
+def confirm(msg : String) : Bool
+  print "#{msg} [t/N] "
+  STDOUT.flush
+  ans = gets
+  return false if ans.nil?
+  ans = ans.strip.downcase
+  ans == "t" || ans == "tak" || ans == "y" || ans == "yes"
+end
 
-proc confirm(msg: string): bool =
-  stdout.write(msg & " [t/N] ")
-  stdout.flushFile()
-  try:
-    let ans = readLine(stdin).strip().toLowerAscii()
-    result = ans == "t" or ans == "tak" or ans == "y" or ans == "yes"
-  except EOFError:
-    result = false
+exit_code = 0
 
-var exitCode = 0
+targets.each do |t|
+  is_dir  = Dir.exists?(t) && !File.file?(t)
+  is_file = File.file?(t)
 
-for t in targets:
-  let isDir = dirExists(t) and not fileExists(t)
-  let isFile = fileExists(t)
+  unless is_dir || is_file
+    unless force
+      STDERR.puts "dl: nie można usunąć '#{t}': nie istnieje"
+      exit_code = 1
+    end
+    next
+  end
 
-  if not isDir and not isFile:
-    if not force:
-      stderr.styledWriteLine(fgRed, "dl: nie można usunąć '", t, "': nie istnieje")
-      exitCode = 1
-    continue
+  if is_dir && !recursive
+    STDERR.puts "dl: '#{t}' jest katalogiem — użyj -r, aby go usunąć"
+    exit_code = 1
+    next
+  end
 
-  if isDir and not recursive:
-    stderr.styledWriteLine(fgRed, "dl: '", t, "' jest katalogiem — użyj -r, aby go usunąć")
-    exitCode = 1
-    continue
+  if interactive && !confirm("dl: usunąć '#{t}'?")
+    next
+  end
 
-  if interactive and not confirm("dl: usunąć '" & t & "'?"):
-    continue
+  begin
+    if permanent
+      if is_dir
+        FileUtils.rm_rf(t)
+      else
+        File.delete(t)
+      end
+      puts "dl: usunięto trwale '#{t}'" if verbose
+    else
+      stamp = Time.utc.to_unix
+      dest  = File.join(trash_dir, "#{File.basename(t.chomp('/'))}_#{stamp}")
+      FileUtils.mv(t, dest)
+      puts "dl: przeniesiono do kosza '#{t}' -> '#{dest}'" if verbose
+    end
+  rescue e
+    STDERR.puts "dl: błąd usuwania '#{t}': #{e.message}"
+    exit_code = 1
+  end
+end
 
-  try:
-    if permanent:
-      if isDir:
-        removeDir(t)
-      else:
-        removeFile(t)
-      if verbose:
-        stdout.styledWriteLine(fgYellow, "dl: usunięto trwale '", t, "'")
-    else:
-      let stamp = $getTime().toUnix()
-      let dest = trashDir / (extractFilename(t.strip(chars = {'/'})) & "_" & stamp)
-      if isDir:
-        moveDir(t, dest)
-      else:
-        moveFile(t, dest)
-      if verbose:
-        stdout.styledWriteLine(fgGreen, "dl: przeniesiono do kosza '", t, "' -> '", dest, "'")
-  except OSError as e:
-    stderr.styledWriteLine(fgRed, "dl: błąd usuwania '", t, "': ", e.msg)
-    exitCode = 1
-
-quit(exitCode)
+exit exit_code
