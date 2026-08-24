@@ -1,69 +1,57 @@
-import std/[os, times, parseopt, terminal]
+require "option_parser"
 
-const VERSION = "1.0.0"
+VERSION = "1.0.0"
 
-proc printUsage() =
-  echo "mk — nowoczesna alternatywa dla touch (Zenith Linux)"
-  echo ""
-  echo "Użycie: mk [opcje] PLIK..."
-  echo ""
-  echo "Opcje:"
-  echo "  -c, --no-create      nie twórz pliku, jeśli nie istnieje"
-  echo "  -v, --verbose        wypisuj utworzone/zaktualizowane pliki"
-  echo "  -h, --help           pokaż tę pomoc"
-  echo "      --version        pokaż wersję"
+no_create = false
+verbose   = false
+files     = [] of String
 
-var
-  noCreate = false
-  verbose = false
-  files: seq[string] = @[]
+parser = OptionParser.new do |p|
+  p.banner = "mk — nowoczesna alternatywa dla touch (Zenith Linux)\n\nUżycie: mk [opcje] PLIK..."
+  p.on("-c", "--no-create", "nie twórz pliku, jeśli nie istnieje") { no_create = true }
+  p.on("-v", "--verbose", "wypisuj utworzone/zaktualizowane pliki") { verbose = true }
+  p.on("-h", "--help", "pokaż tę pomoc") { puts p; exit 0 }
+  p.on("--version", "pokaż wersję programu mk") { puts "mk #{VERSION}"; exit 0 }
+  p.unknown_args { |args| files.concat(args) }
+end
+parser.parse
 
-var p = initOptParser()
-for kind, key, val in p.getopt():
-  case kind
-  of cmdArgument: files.add(key)
-  of cmdLongOption, cmdShortOption:
-    case key
-    of "c", "no-create": noCreate = true
-    of "v", "verbose": verbose = true
-    of "h", "help":
-      printUsage()
-      quit(0)
-    of "version":
-      echo "mk " & VERSION
-      quit(0)
-    else: discard
-  of cmdEnd: discard
+if files.empty?
+  STDERR.puts "mk: brak argumentu — podaj nazwę pliku"
+  exit 1
+end
 
-if files.len == 0:
-  stderr.styledWriteLine(fgRed, "mk: brak argumentu — podaj nazwę pliku")
-  quit(1)
+exit_code = 0
+now = Time.utc
 
-var exitCode = 0
-let now = getTime()
+files.each do |f|
+  just_created = false
 
-for f in files:
-  var justCreated = false
-  if not fileExists(f):
-    if noCreate:
-      continue
-    try:
-      writeFile(f, "")
-      justCreated = true
-    except OSError as e:
-      stderr.styledWriteLine(fgRed, "mk: nie można utworzyć '", f, "': ", e.msg)
-      exitCode = 1
-      continue
+  unless File.exists?(f)
+    next if no_create
+    begin
+      File.write(f, "")
+      just_created = true
+    rescue e
+      STDERR.puts "mk: nie można utworzyć '#{f}': #{e.message}"
+      exit_code = 1
+      next
+    end
+  end
 
-  try:
-    setLastModificationTime(f, now)
-    if verbose:
-      if justCreated:
-        stdout.styledWriteLine(fgGreen, "mk: utworzono plik '", f, "'")
-      else:
-        stdout.styledWriteLine(fgCyan, "mk: zaktualizowano znacznik czasu '", f, "'")
-  except OSError as e:
-    stderr.styledWriteLine(fgRed, "mk: błąd aktualizacji czasu '", f, "': ", e.msg)
-    exitCode = 1
+  begin
+    File.utime(now, now, f)
+    if verbose
+      if just_created
+        puts "mk: utworzono plik '#{f}'"
+      else
+        puts "mk: zaktualizowano znacznik czasu '#{f}'"
+      end
+    end
+  rescue e
+    STDERR.puts "mk: błąd aktualizacji czasu '#{f}': #{e.message}"
+    exit_code = 1
+  end
+end
 
-quit(exitCode)
+exit exit_code
