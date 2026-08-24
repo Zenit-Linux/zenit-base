@@ -1,5 +1,5 @@
 name: zenith-tools
-version: 1.0.0
+version: 1.1.0
 
 authors:
   - Zenith Linux Developers
@@ -8,13 +8,38 @@ crystal: ">= 1.10.0"
 
 license: Apache-2.0
 
-# Cztery narzędzia napisane w Crystalu, każde jako osobny binarny target.
+# Wszystkie narzędzia CLI Zenith Linux napisane w Crystalu.
+# Każdy klucz to osobny plik binarny budowany przez `shards build`.
 targets:
   about:
-    main: about/src/about.cr
+    main: tools/about/src/about.cr
+  cr:
+    main: tools/cr/src/cr.cr
+  dl:
+    main: tools/dl/src/dl.cr
+  mk:
+    main: tools/mk/src/mk.cr
   ow:
-    main: ow/src/ow.cr
+    main: tools/ow/src/ow.cr
   gr:
-    main: gr/src/gr.cr
+    main: tools/gr/src/gr.cr
   pm:
-    main: pm/src/pm.cr
+    main: tools/pm/src/pm.cr
+  rm:
+    main: tools/rm/src/rm.cr
+  sp:
+    main: tools/sp/src/sp.cr
+  kp:
+    main: tools/kp/src/kp.cr
+  wp:
+    main: tools/wp/src/wp.cr
+  sz:
+    main: tools/sz/src/sz.cr
+  zn:
+    main: tools/zn/src/zn.cr
+  lb:
+    main: tools/lb/src/lb.cr
+  wz:
+    main: tools/wz/src/wz.cr
+  pr:
+    main: tools/pr/src/pr.cr
