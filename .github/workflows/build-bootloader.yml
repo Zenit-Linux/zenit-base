@@ -1,1 +1,72 @@
+name: Build Zenit bootloader (zboot, UEFI)
 
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - "bootloader/**"
+      - "zenit-base.nimble"
+      - ".github/workflows/build-bootloader.yml"
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-zboot:
+    name: Build zboot (UEFI x86_64, BOOTX64.EFI)
+    runs-on: ubuntu-latest
+    # zboot jest obecnie szkieletem backendu UEFI — patrz TODO w
+    # bootloader/zboot.nim (parsowanie ELF, faktyczny handoff do jądra).
+    # Nie blokujemy jeszcze reszty CI w razie niepowodzenia.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Nim
+        uses: jiro4989/setup-nim-action@v2
+        with:
+          nim-version: '2.0.x'
+
+      - name: Install toolchain (mingw-w64, OVMF, qemu)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-mingw-w64-x86-64 ovmf qemu-system-x86 mtools dosfstools
+
+      # Krzyżowa kompilacja do PE32+ (subsystem EFI_APPLICATION) przez
+      # mingw-w64, zgodnie z taskiem `buildBootloader` w zenit-base.nimble.
+      - name: Build BOOTX64.EFI
+        run: nimble buildBootloader
+
+      - name: Zbuduj obraz partycji ESP (FAT) do testu w QEMU
+        run: |
+          mkdir -p esp/EFI/BOOT
+          cp bootloader/BOOTX64.EFI esp/EFI/BOOT/BOOTX64.EFI
+          dd if=/dev/zero of=esp.img bs=1M count=64
+          mkfs.vfat esp.img
+          mmd -i esp.img ::/EFI ::/EFI/BOOT
+          mcopy -i esp.img bootloader/BOOTX64.EFI ::/EFI/BOOT/BOOTX64.EFI
+
+      # TODO: gdy zboot będzie potrafił faktycznie znaleźć i wczytać
+      # \ZENIT\KERNEL.ELF oraz przekazać sterowanie dalej, rozszerzyć ten
+      # krok o realny test: dodać do esp.img plik jądra i zweryfikować
+      # w logu QEMU (przez -serial stdio), że zboot doszedł do etapu
+      # ExitBootServices bez paniki.
+      - name: Test rozruchu w QEMU (OVMF)
+        run: |
+          OVMF_CODE=/usr/share/OVMF/OVMF_CODE.fd
+          OVMF_VARS=/usr/share/OVMF/OVMF_VARS.fd
+          timeout 15 qemu-system-x86_64 \
+            -machine q35 -m 256 \
+            -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
+            -drive if=pflash,format=raw,file="$OVMF_VARS" \
+            -drive format=raw,file=esp.img \
+            -display none -serial stdio -nographic || true
+
+      - name: Upload artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zboot-uefi
+          path: |
+            bootloader/BOOTX64.EFI
+            esp.img
