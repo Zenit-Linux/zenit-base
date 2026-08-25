@@ -1,4 +1,4 @@
-name: Build All Zenith Linux Tools
+name: Build All Zenit Linux
 
 on:
   push:
@@ -8,45 +8,70 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-nim-tools:
-    name: Build Nim tools (zesh, cr, dl, mk)
+  build-nim-shell:
+    name: Build powłoki zesh (Nim)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Setup Nim
-        uses: jiro4989/setup-nim-action@v2
+      - uses: jiro4989/setup-nim-action@v2
         with:
           nim-version: '2.0.x'
-
       - name: Build
-        run: nimble build -d:release -y
-
+        run: nimble buildShell
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: nim-tools
-          path: |
-            zesh/zesh
-            cr/cr
-            dl/dl
-            mk/mk
+          name: nim-shell
+          path: zesh/zesh
 
-  build-crystal-tools:
-    name: Build Crystal tools (about, ow, gr, pm)
+  build-init-system:
+    name: Build systemu init zsrv (Nim)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: jiro4989/setup-nim-action@v2
+        with:
+          nim-version: '2.0.x'
+      - name: Build
+        run: nimble buildInit
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: init-system
+          path: init-system/zsrv
 
-      - name: Setup Crystal
-        uses: crystal-lang/install-crystal@v1
+  build-bootloader:
+    name: Build bootloadera zboot (Nim, UEFI, szkielet)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jiro4989/setup-nim-action@v2
+        with:
+          nim-version: '2.0.x'
+      - name: Install mingw-w64 (toolchain PE32+/UEFI)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-mingw-w64-x86-64
+      - name: Build
+        run: nimble buildBootloader
+      - name: Upload artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bootloader
+          path: bootloader/BOOTX64.EFI
 
+  build-crystal-tools:
+    name: Build narzędzi CLI (Crystal)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: crystal-lang/install-crystal@v1
       - name: Install dependencies
         run: shards install
-
       - name: Build
         run: shards build --release
-
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -56,7 +81,7 @@ jobs:
   verify-orchestrator:
     name: Weryfikacja build.janet
     runs-on: ubuntu-latest
-    needs: [build-nim-tools, build-crystal-tools]
+    needs: [build-nim-shell, build-init-system, build-crystal-tools]
     steps:
       - uses: actions/checkout@v4
 
@@ -67,3 +92,34 @@ jobs:
 
       - name: Sprawdź składnię build.janet
         run: janet -c build.janet /dev/null
+
+  package-dist:
+    name: Zbierz wszystkie binaria do dist/
+    runs-on: ubuntu-latest
+    needs: [build-nim-shell, build-init-system, build-crystal-tools, verify-orchestrator]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: nim-shell
+          path: dist/
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: init-system
+          path: dist/
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: crystal-tools
+          path: dist/
+
+      - name: Ustaw uprawnienia wykonywalne
+        run: chmod +x dist/* || true
+
+      - name: Upload zbiorczego artefaktu dist/
+        uses: actions/upload-artifact@v4
+        with:
+          name: zenith-linux-dist
+          path: dist/
