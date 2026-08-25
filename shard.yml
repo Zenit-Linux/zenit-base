@@ -43,3 +43,15 @@ targets:
     main: tools/wz/src/wz.cr
   pr:
     main: tools/pr/src/pr.cr
+  df:
+    main: tools/df/src/df.cr
+  du:
+    main: tools/du/src/du.cr
+  zb:
+    main: tools/zb/src/zb.cr
+  fr:
+    main: tools/fr/src/fr.cr
+  so:
+    main: tools/so/src/so.cr
+  un:
+    main: tools/un/src/un.cr
