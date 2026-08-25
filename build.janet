@@ -1,7 +1,8 @@
 (def nim-tools ["zesh"])
 (def nim-system ["zboot" "zsrv"])
 (def crystal-tools
-  ["about" "cr" "dl" "mk" "ow" "gr" "pm" "rm" "sp" "kp" "wp" "sz" "zn" "lb" "wz" "pr"])
+  ["about" "cr" "dl" "mk" "ow" "gr" "pm" "rm" "sp" "kp" "wp" "sz" "zn" "lb" "wz" "pr"
+   "df" "du" "zb" "fr" "so" "un"])
 
 (defn run
   "Uruchamia polecenie zewnętrzne i przerywa budowę w razie błędu."
@@ -22,9 +23,11 @@
   (print "\n[Zenith] Budowanie komponentów systemowych Nim (szkielety): "
          (string/join nim-system ", "))
   (run "nimble" "buildInit")
-  # Bootloader wymaga celu --os:standalone; może zawieść, dopóki linker
-  # script i pełna implementacja long mode nie są gotowe — patrz TODO
-  # w bootloader/zboot.nim. Nie przerywamy całej budowy w razie błędu.
+  # Bootloader (backend UEFI) wymaga krzyżowej kompilacji przez mingw-w64
+  # do PE32+ (subsystem EFI_APPLICATION); może zawieść, dopóki toolchain
+  # nie jest zainstalowany lub dopóki parsowanie ELF/handoff do jądra nie
+  # są dokończone — patrz TODO w bootloader/zboot.nim. Nie przerywamy
+  # całej budowy w razie błędu.
   (try
     (run "nimble" "buildBootloader")
     ([err]
@@ -52,7 +55,7 @@
   (each t nim-tools
     (copy-if-exists (string t "/" t) (string "dist/" t)))
   (copy-if-exists "init-system/zsrv" "dist/zsrv")
-  (copy-if-exists "bootloader/zboot" "dist/zboot")
+  (copy-if-exists "bootloader/BOOTX64.EFI" "dist/BOOTX64.EFI")
   (each t crystal-tools
     (copy-if-exists (string "bin/" t) (string "dist/" t))))
 
