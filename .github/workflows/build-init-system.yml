@@ -1,1 +1,41 @@
+name: Build Zenit init system (zsrv)
 
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - "init-system/**"
+      - "zenit-base.nimble"
+      - ".github/workflows/build-init-system.yml"
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-zsrv:
+    name: Build zsrv (PID 1)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Nim
+        uses: jiro4989/setup-nim-action@v2
+        with:
+          nim-version: '2.0.x'
+
+      - name: Build
+        run: nimble buildInit
+
+      - name: Smoke test (tryb deweloperski, nie jako PID 1)
+        run: ./init-system/zsrv --version
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zsrv
+          path: init-system/zsrv
+
+  # NOTE: zsrv jest wciąż szkieletem (patrz TODO w init-system/zsrv.nim).
+  # Ten job jedynie kompiluje i uruchamia podstawowy smoke test; pełne
+  # testy integracyjne (np. w kontenerze/QEMU jako rzeczywisty PID 1)
+  # są zaplanowane na kolejny etap rozwoju projektu.
