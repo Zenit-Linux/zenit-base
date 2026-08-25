@@ -1,1 +1,72 @@
+name: Build Zenit Linux tools
 
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - "tools/**"
+      - "zesh/**"
+      - "shard.yml"
+      - "zenit-base.nimble"
+      - ".github/workflows/build-tools.yml"
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-crystal-tools:
+    name: Build Crystal tools (about, cr, dl, mk, ow, gr, pm, rm, sp, kp, wp, sz, zn, lb, wz, pr)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Crystal
+        uses: crystal-lang/install-crystal@v1
+
+      - name: Install dependencies
+        run: shards install
+
+      - name: Check formatting
+        run: crystal tool format --check
+
+      - name: Build (release)
+        run: shards build --release
+
+      - name: Smoke test — wersje narzędzi
+        run: |
+          for bin in bin/*; do
+            echo "== $bin --version =="
+            "$bin" --version || true
+          done
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: crystal-tools
+          path: bin/
+
+  build-nim-shell:
+    name: Build Nim shell (zesh)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Nim
+        uses: jiro4989/setup-nim-action@v2
+        with:
+          nim-version: '2.0.x'
+
+      - name: Install nimble deps
+        run: nimble install -y --depsOnly
+
+      - name: Build
+        run: nimble buildShell
+
+      - name: Smoke test
+        run: ./zesh/zesh --version
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zesh
+          path: zesh/zesh
