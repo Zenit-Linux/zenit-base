@@ -1,0 +1,35 @@
+name: Run Zenit Linux tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  nim-unit-tests:
+    name: Testy jednostkowe Nim (tests/)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jiro4989/setup-nim-action@v2
+        with:
+          nim-version: '2.0.x'
+      - name: Uruchom testy
+        run: nimble test
+
+  crystal-integration-tests:
+    name: Testy integracyjne Crystal (spec/)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: crystal-lang/install-crystal@v1
+
+      - name: Zbuduj narzędzia (wymagane przed spec/)
+        run: |
+          shards install
+          shards build --release
+
+      - name: Uruchom testy integracyjne
+        run: crystal spec
