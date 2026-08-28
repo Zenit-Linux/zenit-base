@@ -1,6 +1,6 @@
 require "option_parser"
 
-VERSION = "1.0.0"
+VERSION = "0.1.0"
 
 show_all      = false
 show_kernel   = false
@@ -11,7 +11,7 @@ show_machine  = false
 as_json       = false
 
 parser = OptionParser.new do |p|
-  p.banner = "about — nowoczesna alternatywa dla uname (Zenith Linux)\n\nUżycie: about [opcje]"
+  p.banner = "about — nowoczesna alternatywa dla uname (Zenit Linux)\n\nUżycie: about [opcje]"
   p.on("-a", "--all", "pokaż wszystkie informacje") { show_all = true }
   p.on("-s", "--kernel-name", "nazwa jądra") { show_kernel = true }
   p.on("-n", "--nodename", "nazwa hosta") { show_hostname = true }
