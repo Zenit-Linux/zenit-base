@@ -1,13 +1,13 @@
 require "option_parser"
 require "process"
 
-# zn — nowoczesna alternatywa dla `find` (Zenith Linux)
+# zn — nowoczesna alternatywa dla `find` (Zenit Linux)
 #
 # STATUS: rozbudowany szkielet — dodano --exec, filtry --min-size/--max-size
 # oraz --newer-than (w minutach). Podążanie za linkami symbolicznymi (-L)
 # oraz predykaty logiczne (-and/-or/-not) pozostają jako TODO.
 
-VERSION = "1.0.0"
+VERSION = "0.1.0"
 
 name_pattern = nil.as(String?)
 only_type    = nil.as(Char?)
@@ -19,7 +19,7 @@ exec_cmd     = nil.as(Array(String)?)
 roots        = [] of String
 
 parser = OptionParser.new do |p|
-  p.banner = "zn — nowoczesna alternatywa dla find (Zenith Linux)\n\nUżycie: zn [ŚCIEŻKA...] [opcje]"
+  p.banner = "zn — nowoczesna alternatywa dla find (Zenit Linux)\n\nUżycie: zn [ŚCIEŻKA...] [opcje]"
   p.on("--name PATTERN", "dopasuj nazwę pliku (glob, np. '*.txt')") { |v| name_pattern = v }
   p.on("--type TYPE", "f = plik, d = katalog") { |v| only_type = v[0]? }
   p.on("--max-depth N", "maksymalna głębokość przeszukiwania") { |v| max_depth = v.to_i }
