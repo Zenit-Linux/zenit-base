@@ -1,7 +1,7 @@
 import std/[posix, os, times]
 import ./types
 import ./state
-import ./log
+import ./logger
 import ./supervisor
 import ./target
 import ./parser
@@ -21,10 +21,10 @@ const
 
 type
   EpollDataUnion {.union.} = object
-    ptr_: pointer
-    fd:   cint
-    u32:  uint32
-    u64:  uint64
+    dataPtr: pointer
+    fd:      cint
+    u32:     uint32
+    u64:     uint64
 
   EpollEvent {.importc: "struct epoll_event", header: "<sys/epoll.h>", pure, final.} = object
     events: uint32
@@ -66,6 +66,12 @@ proc handleSignal(signo: uint32) =
   of SIGHUP:
     log("zsrv: SIGHUP — przeladowanie konfiguracji uslug")
     loadServices(ServiceDir)
+
+    let newTarget = readRuntimeTargetOverride()
+    if newTarget != currentTarget:
+      log("zsrv: przelaczanie targetu '" & $currentTarget & "' -> '" & $newTarget & "'")
+      currentTarget = newTarget
+
     applyTarget(currentTarget)
   else:
     discard
@@ -100,8 +106,8 @@ proc mainLoop*() =
       for i in 0 ..< n:
         if events[i].data.fd == sfd:
           var info: SignalfdSiginfo
-          let bytesRead = read(sfd, addr info, sizeof(SignalfdSiginfo).csize_t)
-          if bytesRead == sizeof(SignalfdSiginfo).clong:
+          let bytesRead = read(sfd, addr info, sizeof(SignalfdSiginfo))
+          if bytesRead == sizeof(SignalfdSiginfo):
             handleSignal(info.ssiSigno)
 
     processPendingRestarts()
