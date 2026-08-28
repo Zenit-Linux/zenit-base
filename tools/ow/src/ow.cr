@@ -1,12 +1,12 @@
 require "option_parser"
 
-VERSION = "1.0.0"
+VERSION = "0.1.0"
 
 recursive = false
 verbose   = false
 
 parser = OptionParser.new do |p|
-  p.banner = "ow — nowoczesna alternatywa dla chown (Zenith Linux)\n\nUżycie: ow [opcje] UŻYTKOWNIK[:GRUPA] ŚCIEŻKA..."
+  p.banner = "ow — nowoczesna alternatywa dla chown (Zenit Linux)\n\nUżycie: ow [opcje] UŻYTKOWNIK[:GRUPA] ŚCIEŻKA..."
   p.on("-R", "--recursive", "działaj rekurencyjnie na katalogach") { recursive = true }
   p.on("-v", "--verbose", "wypisuj każdą zmianę") { verbose = true }
   p.on("-h", "--help", "pokaż tę pomoc") { puts p; exit 0 }
