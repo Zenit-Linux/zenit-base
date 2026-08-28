@@ -7,7 +7,7 @@ on:
       - "tools/**"
       - "zesh/**"
       - "shard.yml"
-      - "zenit-base.nimble"
+      - "zenit_base.nimble"
       - ".github/workflows/build-tools.yml"
   pull_request:
     branches: [ main ]
