@@ -1,7 +1,7 @@
-import std/[os, strutils, terminal]
+import std/[os, strutils, terminal, tables]
 import ./state
-import ./history
-import ./jobs
+import ./cmdhistory
+import ./jobcontrol
 
 proc runBuiltin*(cmd: string, args: seq[string]): (bool, int) =
   ## Zwraca (obsłużone_jako_builtin, kod_wyjścia).
