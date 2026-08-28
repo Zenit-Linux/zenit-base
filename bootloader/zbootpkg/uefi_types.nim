@@ -41,7 +41,7 @@ type
     raiseTpl*:   pointer
     restoreTpl*: pointer
 
-    allocatePages*: pointer
+    allocatePages*: proc(allocType: uint32, memType: EfiMemoryType, pages: uint, memory: ptr uint64): EfiStatus {.cdecl.}
     freePages*:     pointer
     getMemoryMap*:  proc(memoryMapSize: ptr uint, memoryMap: ptr EfiMemoryDescriptor,
                           mapKey: ptr uint, descriptorSize: ptr uint,
