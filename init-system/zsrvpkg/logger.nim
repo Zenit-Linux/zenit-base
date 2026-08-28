@@ -1,4 +1,4 @@
-import std/[os, times, strutils]
+import std/[os, times]
 
 const
   LogPath    = "/var/log/zsrv.log"
