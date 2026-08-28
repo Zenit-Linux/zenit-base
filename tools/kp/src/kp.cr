@@ -1,12 +1,12 @@
 require "option_parser"
 require "file_utils"
 
-# kp — nowoczesna alternatywa dla `cp` (Zenith Linux)
+# kp — nowoczesna alternatywa dla `cp` (Zenit Linux)
 #
 # STATUS: szkielet — podstawowe kopiowanie plików/katalogów działa,
 # zaawansowane opcje oznaczone są jako TODO.
 
-VERSION = "1.0.0"
+VERSION = "0.1.0"
 
 recursive   = false
 force       = false
@@ -16,7 +16,7 @@ preserve    = false
 args        = [] of String
 
 parser = OptionParser.new do |p|
-  p.banner = "kp — nowoczesna alternatywa dla cp (Zenith Linux)\n\nUżycie: kp [opcje] ŹRÓDŁO... CEL"
+  p.banner = "kp — nowoczesna alternatywa dla cp (Zenit Linux)\n\nUżycie: kp [opcje] ŹRÓDŁO... CEL"
   p.on("-r", "--recursive", "kopiuj katalogi rekurencyjnie") { recursive = true }
   p.on("-f", "--force", "nadpisuj bez pytania") { force = true }
   p.on("-i", "--interactive", "pytaj przed nadpisaniem") { interactive = true }
