@@ -1,6 +1,6 @@
 import std/[tables, sequtils, algorithm]
 import ./state
-import ./log
+import ./logger
 
 proc topologicalStartOrder*(names: seq[string]): seq[string] =
   ## Zwraca nazwy usług w kolejności bezpiecznej do startu (zależności
