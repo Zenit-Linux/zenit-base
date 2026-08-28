@@ -1,11 +1,11 @@
 require "option_parser"
 
-# wz — nowoczesna alternatywa dla `ln` (Zenith Linux, "wiąż")
+# wz — nowoczesna alternatywa dla `ln` (Zenit Linux, "wiąż")
 #
 # STATUS: szkielet — linki symboliczne i twarde działają w podstawowym
 # zakresie, walidacja skrzyżowanych systemów plików to TODO.
 
-VERSION = "1.0.0"
+VERSION = "0.1.0"
 
 symbolic = false
 force    = false
@@ -13,7 +13,7 @@ verbose  = false
 args     = [] of String
 
 parser = OptionParser.new do |p|
-  p.banner = "wz — nowoczesna alternatywa dla ln (Zenith Linux)\n\nUżycie: wz [opcje] CEL DOWIĄZANIE"
+  p.banner = "wz — nowoczesna alternatywa dla ln (Zenit Linux)\n\nUżycie: wz [opcje] CEL DOWIĄZANIE"
   p.on("-s", "--symbolic", "utwórz dowiązanie symboliczne zamiast twardego") { symbolic = true }
   p.on("-f", "--force", "usuń istniejące dowiązanie przed utworzeniem nowego") { force = true }
   p.on("-v", "--verbose", "wypisuj tworzone dowiązania") { verbose = true }
