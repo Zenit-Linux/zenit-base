@@ -1,14 +1,14 @@
 name: zenith-tools
-version: 1.1.0
+version: 0.1.0
 
 authors:
-  - Zenith Linux Developers
+  - Zenit Linux Developers
 
 crystal: ">= 1.10.0"
 
 license: Apache-2.0
 
-# Wszystkie narzędzia CLI Zenith Linux napisane w Crystalu.
+# Wszystkie narzędzia CLI Zenit Linux napisane w Crystalu.
 # Każdy klucz to osobny plik binarny budowany przez `shards build`.
 targets:
   about:
@@ -55,3 +55,31 @@ targets:
     main: tools/so/src/so.cr
   un:
     main: tools/un/src/un.cr
+  ar:
+    main: tools/ar/src/ar.cr
+  gdz:
+    main: tools/gdz/src/gdz.cr
+  en:
+    main: tools/en/src/en.cr
+  id:
+    main: tools/id/src/id.cr
+  kt:
+    main: tools/kt/src/kt.cr
+  hn:
+    main: tools/hn/src/hn.cr
+  ro:
+    main: tools/ro/src/ro.cr
+  xa:
+    main: tools/xa/src/xa.cr
+  zdb:
+    main: tools/zdb/src/zdb.cr
+  echo:
+    main: tools/echo/src/echo.cr
+  pf:
+    main: tools/pf/src/pf.cr
+  wm:
+    main: tools/wm/src/wm.cr
+  up:
+    main: tools/up/src/up.cr
+  ni:
+    main: tools/ni/src/ni.cr
