@@ -1,7 +1,7 @@
 require "option_parser"
 require "file_utils"
 
-VERSION = "1.0.0"
+VERSION = "0.1.0"
 
 force       = false
 interactive = false
@@ -10,7 +10,7 @@ no_clobber  = false
 args        = [] of String
 
 parser = OptionParser.new do |p|
-  p.banner = "rm — nowoczesna alternatywa dla mv (Zenith Linux)\n\nUżycie: rm [opcje] ŹRÓDŁO... CEL"
+  p.banner = "rm — nowoczesna alternatywa dla mv (Zenit Linux)\n\nUżycie: rm [opcje] ŹRÓDŁO... CEL"
   p.on("-f", "--force", "nadpisuj bez pytania") { force = true }
   p.on("-i", "--interactive", "pytaj przed nadpisaniem") { interactive = true }
   p.on("-n", "--no-clobber", "nie nadpisuj istniejących plików") { no_clobber = true }
