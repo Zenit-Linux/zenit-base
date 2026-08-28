@@ -1,6 +1,6 @@
 require "option_parser"
 
-VERSION = "1.0.0"
+VERSION = "0.1.0"
 
 parents = false
 verbose = false
@@ -8,7 +8,7 @@ mode    = ""
 dirs    = [] of String
 
 parser = OptionParser.new do |p|
-  p.banner = "cr — nowoczesna alternatywa dla mkdir (Zenith Linux)\n\nUżycie: cr [opcje] KATALOG..."
+  p.banner = "cr — nowoczesna alternatywa dla mkdir (Zenit Linux)\n\nUżycie: cr [opcje] KATALOG..."
   p.on("-p", "--parents", "twórz katalogi nadrzędne w razie potrzeby") { parents = true }
   p.on("-m MODE", "--mode=MODE", "ustaw uprawnienia (np. 755)") { |v| mode = v }
   p.on("-v", "--verbose", "wypisuj utworzone katalogi") { verbose = true }
