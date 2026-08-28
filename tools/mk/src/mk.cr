@@ -1,13 +1,13 @@
 require "option_parser"
 
-VERSION = "1.0.0"
+VERSION = "0.1.0"
 
 no_create = false
 verbose   = false
 files     = [] of String
 
 parser = OptionParser.new do |p|
-  p.banner = "mk — nowoczesna alternatywa dla touch (Zenith Linux)\n\nUżycie: mk [opcje] PLIK..."
+  p.banner = "mk — nowoczesna alternatywa dla touch (Zenit Linux)\n\nUżycie: mk [opcje] PLIK..."
   p.on("-c", "--no-create", "nie twórz pliku, jeśli nie istnieje") { no_create = true }
   p.on("-v", "--verbose", "wypisuj utworzone/zaktualizowane pliki") { verbose = true }
   p.on("-h", "--help", "pokaż tę pomoc") { puts p; exit 0 }
