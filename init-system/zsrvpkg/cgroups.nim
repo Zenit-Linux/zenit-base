@@ -1,8 +1,9 @@
 import std/[os, strutils]
 import ./types
-import ./log
+import ./logger
 
 const CgroupRoot = "/sys/fs/cgroup/zenit"
+const CgroupSysRoot = "/sys/fs/cgroup"
 
 proc ensureCgroupRootExists() =
   try:
@@ -10,6 +11,20 @@ proc ensureCgroupRootExists() =
       createDir(CgroupRoot)
   except OSError as e:
     log("cgroups: nie można utworzyć '" & CgroupRoot & "': " & e.msg)
+
+proc enableSubtreeControl*() =
+  ## Cgroups v2 wymaga jawnego "delegowania" kontrolerów w dół hierarchii:
+  ## kontroler dostępny w cgroup.controllers rodzica trzeba dopisać do
+  ## cgroup.subtree_control, zanim dzieci będą mogły z niego korzystać.
+  ## Wywoływane raz, przy starcie zsrv, zanim jakakolwiek usługa dostanie
+  ## własną cgroupę.
+  ensureCgroupRootExists()
+  for path in [CgroupSysRoot / "cgroup.subtree_control", CgroupRoot / "cgroup.subtree_control"]:
+    try:
+      writeFile(path, "+memory +cpu")
+    except OSError as e:
+      log("cgroups: nie udalo sie wlaczyc kontrolerow w '" & path & "': " & e.msg &
+          " (limity MemoryMax=/CPUQuota= moga nie dzialac)")
 
 proc serviceCgroupPath(serviceName: string): string =
   CgroupRoot / serviceName
@@ -53,7 +68,13 @@ proc attachPidToCgroup*(serviceName: string, pid: int32) =
     discard # brak cgroups v2 w systemie / brak uprawnień — nie blokujemy startu usługi
 
 proc removeCgroup*(serviceName: string) =
-  ## TODO: usuwanie cgroupy po zatrzymaniu usługi wymaga, aby cgroup.procs
-  ## było puste (wszystkie procesy zakończone) — dziś nie czyścimy katalogów,
-  ## co przy wielu restartach pozostawia puste cgroupy w drzewie.
-  discard
+  ## Usuwa cgroupę usługi, o ile cgroup.procs jest puste (rmdir na
+  ## niepustej cgroupie zawiedzie w jądrze — nie jest to błąd krytyczny,
+  ## po prostu spróbujemy ponownie przy następnym restarcie usługi).
+  let path = serviceCgroupPath(serviceName)
+  try:
+    let procsContent = readFile(path / "cgroup.procs").strip()
+    if procsContent.len == 0 and dirExists(path):
+      removeDir(path)
+  except OSError:
+    discard # cgroupa nie istnieje / wciąż zawiera procesy — pomijamy
