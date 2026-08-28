@@ -6,7 +6,7 @@ require "option_parser"
 # Sortowanie wg konkretnej kolumny (-k) i scalanie posortowanych plików
 # (-m) pozostają jako TODO.
 
-VERSION = "1.0.0"
+VERSION = "0.1.0"
 
 numeric = false
 reverse = false
@@ -14,7 +14,7 @@ unique  = false
 files   = [] of String
 
 parser = OptionParser.new do |p|
-  p.banner = "so — nowoczesna alternatywa dla sort (Zenith Linux)\n\nUżycie: so [opcje] [PLIK...]"
+  p.banner = "so — nowoczesna alternatywa dla sort (Zenit Linux)\n\nUżycie: so [opcje] [PLIK...]"
   p.on("-n", "--numeric", "sortuj numerycznie zamiast leksykograficznie") { numeric = true }
   p.on("-r", "--reverse", "odwróć kolejność sortowania") { reverse = true }
   p.on("-u", "--unique", "usuń zduplikowane linie z wyniku") { unique = true }
