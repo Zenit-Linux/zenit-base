@@ -1,11 +1,11 @@
 require "option_parser"
 
-# lb — nowoczesna alternatywa dla `wc` (Zenith Linux, "liczba")
+# lb — nowoczesna alternatywa dla `wc` (Zenit Linux, "liczba")
 #
 # STATUS: szkielet — liczenie linii/słów/bajtów działa,
 # tryb wielobajtowy (znaki UTF-8 vs bajty) to TODO.
 
-VERSION = "1.0.0"
+VERSION = "0.1.0"
 
 show_lines = false
 show_words = false
@@ -13,7 +13,7 @@ show_bytes = false
 files      = [] of String
 
 parser = OptionParser.new do |p|
-  p.banner = "lb — nowoczesna alternatywa dla wc (Zenith Linux)\n\nUżycie: lb [opcje] [PLIK...]"
+  p.banner = "lb — nowoczesna alternatywa dla wc (Zenit Linux)\n\nUżycie: lb [opcje] [PLIK...]"
   p.on("-l", "--lines", "licz tylko linie") { show_lines = true }
   p.on("-w", "--words", "licz tylko słowa") { show_words = true }
   p.on("-c", "--bytes", "licz tylko bajty") { show_bytes = true }
