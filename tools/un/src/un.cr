@@ -6,14 +6,14 @@ require "option_parser"
 # `uniq`) działa, wraz z licznikiem wystąpień (-c). Tryby --repeated i
 # --unique (tylko linie odpowiednio powtórzone / niepowtórzone) to TODO.
 
-VERSION = "1.0.0"
+VERSION = "0.1.0"
 
 show_count   = false
 ignore_case  = false
 files        = [] of String
 
 parser = OptionParser.new do |p|
-  p.banner = "un — nowoczesna alternatywa dla uniq (Zenith Linux)\n\nUżycie: un [opcje] [PLIK...]\n\nUwaga: tak jak klasyczne uniq, usuwa tylko SĄSIADUJĄCE duplikaty — dane wejściowe zwykle warto najpierw posortować (np. przez `so`)."
+  p.banner = "un — nowoczesna alternatywa dla uniq (Zenit Linux)\n\nUżycie: un [opcje] [PLIK...]\n\nUwaga: tak jak klasyczne uniq, usuwa tylko SĄSIADUJĄCE duplikaty — dane wejściowe zwykle warto najpierw posortować (np. przez `so`)."
   p.on("-c", "--count", "poprzedzaj każdą linię liczbą wystąpień") { show_count = true }
   p.on("-i", "--ignore-case", "ignoruj wielkość liter przy porównywaniu") { ignore_case = true }
   p.on("-h", "--help", "pokaż tę pomoc") { puts p; exit 0 }
