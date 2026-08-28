@@ -1,11 +1,12 @@
-version       = "0.3.0"
-author        = "Zenith Linux Developers"
-description   = "Rdzenne komponenty Zenith Linux napisane w Nim: powłoka zesh, bootloader zboot i system init zsrv (każdy rozbity na moduły w katalogach *pkg/)"
+version       = "0.1.0"
+author        = "Zenit Linux Developers"
+description   = "Rdzenne komponenty Zenit Linux napisane w Nim: powłoka zesh, bootloader zboot i system init zsrv (każdy rozbity na moduły w katalogach *pkg/)"
 license       = "Apache-2.0"
 
 # Jedyny komponent budowany jako zwykły, natywny binarny plik przez `nimble build`.
-# zboot (bootloader, --os:standalone) i zsrv (init/PID 1) mają własne zadania
-# poniżej, ponieważ wymagają nietypowych flag kompilacji.
+# zboot (bootloader, --os:any + własny alokator, patrz zbootpkg/allocator.nim)
+# i zsrv (init/PID 1) mają własne zadania poniżej, ponieważ wymagają
+# nietypowych flag kompilacji.
 bin           = @["zesh/zesh"]
 srcDir        = "."
 
@@ -25,7 +26,17 @@ task buildBootloader, "Buduje bootloader zboot jako aplikację UEFI (BOOTX64.EFI
   # wywołań MS x64 ABI, dlatego krzyżowo kompilujemy przez mingw-w64 zamiast
   # domyślnego GCC/System V ABI. Wymaga zainstalowanego pakietu
   # `gcc-mingw-w64-x86-64` (patrz .github/workflows/build-bootloader.yml).
-  exec "nim c -d:release --os:any --cpu:amd64 --gc:none " &
+  #
+  # --mm:arc -d:useMalloc: `--os:any` (poprawne dla programu freestanding)
+  # nie ma domyślnego alokatora pamięci w bibliotece standardowej Nima —
+  # `-d:useMalloc` każe Nimowi wywoływać zwykłe malloc/free/realloc, które
+  # SAMI dostarczamy w zbootpkg/allocator.nim (przez UEFI AllocatePool),
+  # zamiast pozwolić Nimowi szukać nieistniejącego alokatora "specyficznego
+  # dla systemu" (błąd kompilacji "Port memory manager to your platform").
+  # ARC (zamiast starszego "gc:none"/"mm:none") jest wymagane, bo kod
+  # zboot używa `string`/`seq`, którym bez ŻADNEGO zarządzania pamięcią
+  # ("mm:none") te typy w ogóle nie działają.
+  exec "nim c -d:release --os:any --cpu:amd64 --mm:arc -d:useMalloc " &
        "--cc:gcc --gcc.exe:x86_64-w64-mingw32-gcc --gcc.linkerexe:x86_64-w64-mingw32-gcc " &
        "--passC:\"-mabi=ms\" " &
        "--passL:\"-nostdlib -Wl,--subsystem,10 -Wl,-e,efi_main -Wl,--oformat=binary\" " &
@@ -36,5 +47,18 @@ task buildAll, "Buduje wszystkie komponenty Nim (zesh, zsrv, zboot)":
   exec "nimble buildInit"
   exec "nimble buildBootloader"
 
-task test, "Uruchamia podstawowe testy dymne narzędzi Nim":
-  exec "nim c -r zesh/zesh.nim --version"
+task test, "Uruchamia testy jednostkowe komponentów Nim (patrz tests/)":
+  # Testy pokrywają czystą logikę (parsowanie, sortowanie zależności,
+  # tokenizacja) bez potrzeby bycia rootem/PID 1 czy forkowania procesów.
+  # Integracyjne testy narzędzi Crystal są osobno w spec/ (patrz `crystal spec`).
+  exec "nim c -r tests/test_depgraph.nim"
+  exec "nim c -r tests/test_service_parser.nim"
+  exec "nim c -r tests/test_lexer.nim"
+  exec "nim c -r tests/test_parser.nim"
+  echo "\nWszystkie testy Nim przeszły pomyślnie."
+
+task install, "Instaluje zbudowane binaria do systemu (PREFIX=/usr/local domyślnie)":
+  exec "bash scripts/install.sh"
+
+task uninstall, "Usuwa zainstalowane wcześniej binaria":
+  exec "bash scripts/uninstall.sh"
