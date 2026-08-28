@@ -1,6 +1,7 @@
 import std/[os, strutils]
 import ./types
-import ./log
+import ./state
+import ./logger
 
 proc detectTargetFromCmdline*(): Target =
   ## Odczytuje `/proc/cmdline` w poszukiwaniu `zsrv.target=...`, z
@@ -25,3 +26,27 @@ proc detectTargetFromCmdline*(): Target =
     else: discard
 
   tgMultiUser
+
+const RuntimeTargetFile = "/run/zenit/target"
+
+proc readRuntimeTargetOverride*(): Target =
+  ## Odczytuje `/run/zenit/target` (jeśli istnieje) jako mechanizm
+  ## przełączania targetu W LOCIE, bez ponownego rozruchu — operator albo
+  ## przyszłe narzędzie `zsrvctl isolate TARGET` może nadpisać ten plik i
+  ## wysłać `kill -HUP 1`, żeby zsrv przeszedł np. z multi-user na rescue
+  ## (co zatrzyma usługi spoza nowego targetu — patrz supervisor.applyTarget).
+  ## Zwraca bieżący `currentTarget`, jeśli plik nie istnieje albo ma
+  ## nierozpoznaną zawartość (brak zmiany).
+  if not fileExists(RuntimeTargetFile):
+    return currentTarget
+
+  try:
+    let value = readFile(RuntimeTargetFile).strip()
+    case value
+    of "rescue": return tgRescue
+    of "multi-user": return tgMultiUser
+    else:
+      log("zsrv: nieznany target w " & RuntimeTargetFile & ": '" & value & "'")
+      return currentTarget
+  except IOError:
+    return currentTarget
