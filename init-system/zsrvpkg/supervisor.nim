@@ -1,9 +1,11 @@
-import std/[os, posix, strutils, sequtils, times]
+import std/[os, posix, strutils, sequtils, times, tables]
 import ./types
 import ./state
-import ./log
+import ./logger
 import ./cgroups
 import ./depgraph
+
+const ServiceLogDir = "/var/log/zenit"
 
 proc dependenciesSatisfied(svc: ServiceRuntime): bool =
   for dep in svc.def.after:
@@ -26,6 +28,23 @@ proc dropPrivileges(username: string) =
     stderr.writeLine("zsrv: setgid() nie powiodlo sie dla '" & username & "'")
   if setuid(pw.pw_uid) != 0:
     stderr.writeLine("zsrv: setuid() nie powiodlo sie dla '" & username & "'")
+
+proc redirectServiceOutput(name: string) =
+  ## Wywoływane W PROCESIE POTOMNYM, po fork(), przed execvp(): przepina
+  ## stdout/stderr na dedykowany plik logu usługi, zamiast dziedziczenia
+  ## deskryptorów PID 1 (co mieszałoby wyjścia wszystkich usług razem).
+  try:
+    if not dirExists(ServiceLogDir):
+      createDir(ServiceLogDir)
+  except OSError:
+    return # brak /var/log/zenit — usługa i tak wystartuje, tylko bez własnego logu
+
+  let logPath = ServiceLogDir / (name & ".log")
+  let fd = posix.open(logPath.cstring, O_WRONLY or O_CREAT or O_APPEND, 0o644)
+  if fd >= 0:
+    discard dup2(fd, STDOUT_FILENO)
+    discard dup2(fd, STDERR_FILENO)
+    discard close(fd)
 
 proc startService*(name: string) =
   if name notin services:
@@ -56,15 +75,15 @@ proc startService*(name: string) =
     return
 
   if pid == 0:
-    # Proces potomny: przypisz do cgroupy, obniż uprawnienia (jeśli User=),
-    # przygotuj argumenty i wykonaj docelowy program.
+    # Proces potomny: nowa grupa procesów, przypisanie do cgroupy,
+    # przekierowanie logów, obniżenie uprawnień (jeśli User=), przygotuj
+    # argumenty i wykonaj docelowy program.
+    discard setsid() # własne PGID — pozwala potem zabić CAŁĄ grupę (dzieci usługi też)
     attachPidToCgroup(name, getpid().int32)
+    redirectServiceOutput(name)
     if svc.def.user.len > 0:
       dropPrivileges(svc.def.user)
 
-    # TODO: setsid() do własnej grupy procesów oraz przekierowanie
-    # stdout/stderr do /var/log/zenit/<usługa>.log zamiast dziedziczenia
-    # deskryptorów PID 1.
     let parts = svc.def.execStart.splitWhitespace()
     if parts.len == 0:
       quit(1)
@@ -83,20 +102,25 @@ proc servicesForTarget*(target: Target): seq[string] =
 
 proc applyTarget*(target: Target) =
   ## Uruchamia (w poprawnej kolejności zależności) wszystkie usługi
-  ## należące do danego targetu, które nie są jeszcze uruchomione.
-  ## TODO: zatrzymywanie usług NIE należących do nowego targetu przy
-  ## przełączaniu (dziś applyTarget tylko dokłada usługi).
+  ## należące do danego targetu, które nie są jeszcze uruchomione, ORAZ
+  ## zatrzymuje usługi DZIAŁAJĄCE, które nie należą do aktywnego targetu
+  ## (np. usługi tylko-multi-user po przełączeniu na rescue).
   let names = servicesForTarget(target)
   let order = topologicalStartOrder(names)
   for name in order:
     if services[name].state == ssStopped:
       startService(name)
 
+  for name in toSeq(services.keys):
+    if target notin services[name].def.wantedBy and services[name].state == ssRunning:
+      stopService(name)
+
 proc handleExitedChild*(pid: int32, exitedOk: bool) =
   for name, svc in services.mpairs:
     if svc.pid == pid:
       logService(name, "zakończyła działanie (pid=" & $pid & ", ok=" & $exitedOk & ")")
       svc.pid = 0
+      removeCgroup(name) # bezpieczne również gdy usługa zaraz wystartuje ponownie
 
       case svc.def.restart
       of rpAlways:
@@ -134,7 +158,7 @@ proc processStopEscalations*() =
     if svc.state == ssStopping and svc.stopDeadline > fromUnix(0) and svc.stopDeadline <= now:
       if svc.pid != 0:
         logService(name, "nie zareagowała na SIGTERM w porę — wysyłam SIGKILL")
-        discard kill(svc.pid.Pid, SIGKILL)
+        discard kill((-svc.pid).Pid, SIGKILL) # PID ujemny = cała grupa procesów (setsid() w startService)
       svc.stopDeadline = fromUnix(0)
 
 proc nextWakeupDeadline*(): int =
@@ -171,13 +195,27 @@ proc reapChildren*() =
     let exitedOk = WIFEXITED(status) and WEXITSTATUS(status) == 0
     handleExitedChild(pid.int32, exitedOk)
 
+proc stopService*(name: string) =
+  ## Zatrzymuje POJEDYNCZĄ usługę: SIGTERM do całej grupy procesów i
+  ## zaplanowanie SIGKILL po StopSec= sekundach (eskalacja obsługiwana
+  ## przez processStopEscalations w pętli zdarzeń). Używane zarówno przez
+  ## stopAllServices (zamykanie systemu), jak i applyTarget (usługa
+  ## przestała należeć do aktywnego targetu).
+  if name notin services:
+    return
+  var svc = services[name]
+  if svc.state != ssRunning or svc.pid == 0:
+    return
+
+  discard kill((-svc.pid).Pid, SIGTERM) # PID ujemny = cała grupa procesów (setsid() w startService)
+  svc.state = ssStopping
+  svc.stopDeadline = getTime() + initDuration(seconds = svc.def.stopSec)
+  services[name] = svc
+
 proc stopAllServices*() =
   ## Faza 1 zamykania: wysyła SIGTERM do wszystkich działających usług i
   ## planuje SIGKILL po upływie StopSec= dla każdej z nich (obsługiwane
   ## później przez processStopEscalations w pętli zdarzeń).
   log("zsrv: zatrzymywanie wszystkich usług...")
-  for name, svc in services.mpairs:
-    if svc.state == ssRunning and svc.pid != 0:
-      discard kill(svc.pid.Pid, SIGTERM)
-      svc.state = ssStopping
-      svc.stopDeadline = getTime() + initDuration(seconds = svc.def.stopSec)
+  for name in toSeq(services.keys):
+    stopService(name)
