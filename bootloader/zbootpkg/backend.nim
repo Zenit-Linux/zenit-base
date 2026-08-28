@@ -21,7 +21,7 @@ type
 
 proc detectFirmwareKind*(): FirmwareKind =
   ## Na tym etapie zboot jest budowany wyłącznie jako aplikacja UEFI
-  ## (patrz task `buildBootloader` w zenit-base.nimble), więc wykrywanie
+  ## (patrz task `buildBootloader` w zenit_base.nimble), więc wykrywanie
   ## firmware jest tu formalnością — zawsze zwraca fwUefi. Gdy powstanie
   ## plugin BIOS, ten projekt najprawdopodobniej pozostanie dwoma
   ## oddzielnymi binarkami (BOOTX64.EFI vs MBR/VBR), a nie jednym
