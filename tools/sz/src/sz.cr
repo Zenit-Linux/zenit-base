@@ -1,11 +1,11 @@
 require "option_parser"
 
-# sz — nowoczesna alternatywa dla `grep` (Zenith Linux)
+# sz — nowoczesna alternatywa dla `grep` (Zenit Linux)
 #
 # STATUS: rozbudowany szkielet — dodano kontekst (-A/-B/-C) i kolorowanie
 # dopasowanego fragmentu. -l/-L (tylko nazwy plików) pozostaje jako TODO.
 
-VERSION = "1.0.0"
+VERSION = "0.1.0"
 
 ignore_case  = false
 invert       = false
@@ -19,7 +19,7 @@ context_after  = 0
 args         = [] of String
 
 parser = OptionParser.new do |p|
-  p.banner = "sz — nowoczesna alternatywa dla grep (Zenith Linux)\n\nUżycie: sz [opcje] WZORZEC [PLIK...]"
+  p.banner = "sz — nowoczesna alternatywa dla grep (Zenit Linux)\n\nUżycie: sz [opcje] WZORZEC [PLIK...]"
   p.on("-i", "--ignore-case", "ignoruj wielkość liter") { ignore_case = true }
   p.on("-v", "--invert-match", "wypisz linie NIE pasujące do wzorca") { invert = true }
   p.on("-n", "--line-number", "poprzedzaj dopasowania numerem linii") { line_number = true }
