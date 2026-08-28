@@ -13,12 +13,12 @@ def pid_exists?(pid : Int32) : Bool
   LibZb.kill(pid, 0) == 0
 end
 
-# zb — nowoczesna alternatywa dla `kill` (Zenith Linux, "zabij")
+# zb — nowoczesna alternatywa dla `kill` (Zenit Linux, "zabij")
 #
 # STATUS: szkielet — wysyłanie sygnałów po PID działa; dopasowanie po
 # nazwie procesu (jak `pkill`) i --timeout (SIGTERM potem SIGKILL) to TODO.
 
-VERSION = "1.0.0"
+VERSION = "0.1.0"
 
 SIGNAL_NAMES = {
   "HUP" => 1, "INT" => 2, "QUIT" => 3, "KILL" => 9,
@@ -31,7 +31,7 @@ pids       = [] of Int32
 
 args = ARGV.dup
 parser = OptionParser.new do |p|
-  p.banner = "zb — nowoczesna alternatywa dla kill (Zenith Linux)\n\nUżycie: zb [-SYGNAŁ] PID..."
+  p.banner = "zb — nowoczesna alternatywa dla kill (Zenit Linux)\n\nUżycie: zb [-SYGNAŁ] PID..."
   p.on("-l", "--list", "wypisz dostępne nazwy sygnałów") { list_only = true }
   p.on("-s SYGNAŁ", "--signal=SYGNAŁ", "sygnał do wysłania (nazwa lub numer)") do |v|
     signal_num = SIGNAL_NAMES[v.upcase]? || v.to_i? || signal_num
