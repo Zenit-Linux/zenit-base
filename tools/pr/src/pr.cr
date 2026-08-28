@@ -1,16 +1,16 @@
 require "option_parser"
 
-# pr — nowoczesna alternatywa dla `ps` (Zenith Linux, "procesy")
+# pr — nowoczesna alternatywa dla `ps` (Zenit Linux, "procesy")
 #
 # STATUS: szkielet — czyta /proc i wypisuje podstawowe informacje
 # o procesach; filtrowanie i sortowanie zaawansowane to TODO.
 
-VERSION = "1.0.0"
+VERSION = "0.1.0"
 
 show_all = false
 
 parser = OptionParser.new do |p|
-  p.banner = "pr — nowoczesna alternatywa dla ps (Zenith Linux)\n\nUżycie: pr [opcje]"
+  p.banner = "pr — nowoczesna alternatywa dla ps (Zenit Linux)\n\nUżycie: pr [opcje]"
   p.on("-a", "--all", "pokaż procesy wszystkich użytkowników") { show_all = true }
   p.on("-h", "--help", "pokaż tę pomoc") { puts p; exit 0 }
   p.on("--version", "pokaż wersję programu pr") { puts "pr #{VERSION}"; exit 0 }
