@@ -1,13 +1,13 @@
 require "option_parser"
 
-# sp — nowoczesna alternatywa dla `ls` (Zenith Linux)
+# sp — nowoczesna alternatywa dla `ls` (Zenit Linux)
 #
 # STATUS: rozbudowany szkielet — dodano kolorowanie wg typu pliku,
 # rekurencyjne wypisywanie (-R) i sortowanie po rozmiarze (-S).
 # Format długi z właścicielem/grupą (wymaga wywołań LibC getpwuid/getgrgid)
 # oraz locale-aware sortowanie nazw pozostają jako TODO.
 
-VERSION = "1.0.0"
+VERSION = "0.1.0"
 
 show_all    = false
 long_format = false
@@ -20,7 +20,7 @@ no_color    = false
 paths       = [] of String
 
 parser = OptionParser.new do |p|
-  p.banner = "sp — nowoczesna alternatywa dla ls (Zenith Linux)\n\nUżycie: sp [opcje] [ŚCIEŻKA...]"
+  p.banner = "sp — nowoczesna alternatywa dla ls (Zenit Linux)\n\nUżycie: sp [opcje] [ŚCIEŻKA...]"
   p.on("-a", "--all", "pokaż także pliki ukryte") { show_all = true }
   p.on("-l", "--long", "format długi (typ, rozmiar, data)") { long_format = true }
   p.on("-H", "--human", "rozmiary czytelne dla człowieka (KB/MB/GB)") { human_size = true }
