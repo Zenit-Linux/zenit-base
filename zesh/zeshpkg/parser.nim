@@ -58,12 +58,14 @@ proc parsePipelineTokens*(tokens: seq[Token]): Pipeline =
   result.add(current)
 
 proc splitStatements*(tokens: seq[Token]): seq[Statement] =
-  result = @[]
+  # Jawna zmienna `statements` zamiast `result` — patrz wyjaśnienie w
+  # zeshpkg/lexer.tokenize (zagnieżdżony proc nie może przechwytywać `result`).
+  var statements: seq[Statement] = @[]
   var current: seq[Token] = @[]
   var pendingBackground = false
 
   proc flushStatement(sep: StmtSep) =
-    result.add(Statement(
+    statements.add(Statement(
       pipeline: parsePipelineTokens(current),
       sepAfter: sep,
       background: pendingBackground,
@@ -86,3 +88,5 @@ proc splitStatements*(tokens: seq[Token]): seq[Statement] =
 
   if current.len > 0 or pendingBackground:
     flushStatement(sepNone)
+
+  statements
