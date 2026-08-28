@@ -1,7 +1,7 @@
 import std/os
-import zsrvpkg/[types, state, log, parser, target, eventloop]
+import zsrvpkg/[types, state, logger, parser, target, eventloop, cgroups]
 
-const Version = "0.4.0"
+const Version = "0.1.0"
 
 when isMainModule:
   if paramCount() >= 1 and paramStr(1) in ["-v", "--version"]:
@@ -15,5 +15,6 @@ when isMainModule:
 
   currentTarget = detectTargetFromCmdline()
   log("zsrv " & Version & " — uruchamianie w targecie '" & $currentTarget & "'...")
+  enableSubtreeControl()
   loadServices(ServiceDir)
   mainLoop()
