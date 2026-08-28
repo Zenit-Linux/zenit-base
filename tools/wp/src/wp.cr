@@ -1,18 +1,18 @@
 require "option_parser"
 
-# wp — nowoczesna alternatywa dla `cat` (Zenith Linux)
+# wp — nowoczesna alternatywa dla `cat` (Zenit Linux)
 #
 # STATUS: szkielet — wypisywanie plików i stdin działa,
 # numerowanie linii i ściskanie pustych linii to TODO.
 
-VERSION = "1.0.0"
+VERSION = "0.1.0"
 
 number_lines  = false
 squeeze_blank = false
 files         = [] of String
 
 parser = OptionParser.new do |p|
-  p.banner = "wp — nowoczesna alternatywa dla cat (Zenith Linux)\n\nUżycie: wp [opcje] [PLIK...]"
+  p.banner = "wp — nowoczesna alternatywa dla cat (Zenit Linux)\n\nUżycie: wp [opcje] [PLIK...]"
   p.on("-n", "--number", "numeruj wszystkie linie wyjściowe") { number_lines = true }
   p.on("-s", "--squeeze-blank", "zwijaj powtarzające się puste linie") { squeeze_blank = true }
   p.on("-h", "--help", "pokaż tę pomoc") { puts p; exit 0 }
