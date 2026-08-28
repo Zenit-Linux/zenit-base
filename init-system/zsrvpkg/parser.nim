@@ -1,7 +1,7 @@
-import std/[os, strutils, sequtils, times]
+import std/[os, strutils, sequtils, times, tables]
 import ./types
 import ./state
-import ./log
+import ./logger
 
 const
   ServiceDir* = "/etc/zenit/services"
