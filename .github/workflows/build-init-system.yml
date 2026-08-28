@@ -5,7 +5,7 @@ on:
     branches: [ main ]
     paths:
       - "init-system/**"
-      - "zenit-base.nimble"
+      - "zenit_base.nimble"
       - ".github/workflows/build-init-system.yml"
   pull_request:
     branches: [ main ]
@@ -34,8 +34,3 @@ jobs:
         with:
           name: zsrv
           path: init-system/zsrv
-
-  # NOTE: zsrv jest wciąż szkieletem (patrz TODO w init-system/zsrv.nim).
-  # Ten job jedynie kompiluje i uruchamia podstawowy smoke test; pełne
-  # testy integracyjne (np. w kontenerze/QEMU jako rzeczywisty PID 1)
-  # są zaplanowane na kolejny etap rozwoju projektu.
