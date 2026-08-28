@@ -1,9 +1,9 @@
-import std/[os, posix, terminal, strutils]
+import std/[posix, terminal, strutils, tables]
 import ./parser
 import ./state
 import ./vars
 import ./builtins
-import ./jobs
+import ./jobcontrol
 
 proc applyRedirects(r: Redirect) =
   ## Wywoływane W PROCESIE POTOMNYM, po fork(), przed execvp().
