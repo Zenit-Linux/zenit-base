@@ -1,7 +1,7 @@
 require "option_parser"
 require "file_utils"
 
-VERSION = "1.0.0"
+VERSION = "0.1.0"
 
 trash_dir = File.join(ENV["HOME"]? || "/root", ".zenith", "trash")
 
@@ -13,7 +13,7 @@ verbose     = false
 targets     = [] of String
 
 parser = OptionParser.new do |p|
-  p.banner = "dl — nowoczesna alternatywa dla rm (Zenith Linux)\n\nUżycie: dl [opcje] PLIK/KATALOG...\n\nDomyślnie pliki trafiają do kosza: #{trash_dir}"
+  p.banner = "dl — nowoczesna alternatywa dla rm (Zenit Linux)\n\nUżycie: dl [opcje] PLIK/KATALOG...\n\nDomyślnie pliki trafiają do kosza: #{trash_dir}"
   p.on("-r", "--recursive", "usuwaj katalogi rekurencyjnie") { recursive = true }
   p.on("-f", "--force", "nie pytaj, ignoruj brakujące pliki") { force = true }
   p.on("-i", "--interactive", "pytaj przed każdym usunięciem") { interactive = true }
