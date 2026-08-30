@@ -46,6 +46,16 @@ proc redirectServiceOutput(name: string) =
     discard dup2(fd, STDERR_FILENO)
     discard close(fd)
 
+proc stopService*(name: string)
+  ## Forward declaration -- `startService` (poniżej) woła `stopService` w
+  ## gałęzi restartu (np. usługa typu "oneshot", która już raz
+  ## zakończyła działanie i jest uruchamiana ponownie), a `stopService`
+  ## jest zdefiniowane dalej w tym samym pliku. Nim wymaga jawnej
+  ## deklaracji w przód dla wzajemnie rekurencyjnych/naprzód-
+  ## odwołujących się proc na tym samym poziomie modułu -- bez tego
+  ## kompilacja `zsrv.nim` kończy się błędem "undeclared identifier:
+  ## 'stopService'" dokładnie w miejscu wywołania w linii poniżej.
+
 proc startService*(name: string) =
   if name notin services:
     log("zsrv: próba uruchomienia nieznanej usługi '" & name & "'")
@@ -165,7 +175,7 @@ proc nextWakeupDeadline*(): int =
   ## Zwraca liczbę milisekund do najbliższego zdarzenia czasowego (restart
   ## usługi albo eskalacja SIGKILL), albo -1, jeśli nic nie jest zaplanowane.
   ## Używane jako timeout dla epoll_wait w pętli zdarzeń.
-  var earliest: Time
+  var earliest: times.Time
   var found = false
   let now = getTime()
 
