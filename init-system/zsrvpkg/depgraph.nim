@@ -1,4 +1,4 @@
-import std/[tables, sequtils, algorithm]
+import std/[tables, sequtils, algorithm, strutils]
 import ./state
 import ./logger
 
