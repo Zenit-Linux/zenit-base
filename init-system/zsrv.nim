@@ -1,5 +1,5 @@
-import std/os
-import zsrvpkg/[types, state, logger, parser, target, eventloop, cgroups]
+import std/[os, posix]
+import zsrvpkg/[state, logger, parser, target, eventloop, cgroups]
 
 const Version = "0.1.0"
 
