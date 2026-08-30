@@ -25,7 +25,8 @@ task buildBootloader, "Buduje bootloader zboot jako aplikację UEFI (BOOTX64.EFI
   # UEFI wymaga obrazu PE32+ z subsystemem EFI_APPLICATION (10) i konwencji
   # wywołań MS x64 ABI, dlatego krzyżowo kompilujemy przez mingw-w64 zamiast
   # domyślnego GCC/System V ABI. Wymaga zainstalowanego pakietu
-  # `gcc-mingw-w64-x86-64` (patrz .github/workflows/build-bootloader.yml).
+  # `gcc-mingw-w64-x86-64` (patrz build.janet::ensure-mingw i
+  # .github/workflows/build-bootloader.yml).
   #
   # --mm:arc -d:useMalloc: `--os:any` (poprawne dla programu freestanding)
   # nie ma domyślnego alokatora pamięci w bibliotece standardowej Nima —
@@ -36,10 +37,30 @@ task buildBootloader, "Buduje bootloader zboot jako aplikację UEFI (BOOTX64.EFI
   # ARC (zamiast starszego "gc:none"/"mm:none") jest wymagane, bo kod
   # zboot używa `string`/`seq`, którym bez ŻADNEGO zarządzania pamięcią
   # ("mm:none") te typy w ogóle nie działają.
+  #
+  # -masm=intel: zbootpkg/handoff.nim zawiera wstawkę asemblerową
+  # (przełączenie stosu + skok do jądra) napisaną w składni Intel
+  # (`mov rdi, %0`, bez `%`-prefiksów rejestrów) -- domyślnie GCC oczekuje
+  # składni AT&T i bez tej flagi kompilacja C kończy się w assemblerze
+  # błędem "operand size mismatch for `xor'" (rejestr bez `%` jest
+  # interpretowany jako symbol, nie rejestr).
+  #
+  # BRAK --oformat=binary: plik .EFI MUSI być poprawnym obrazem PE32+
+  # (tak wygląda format "UEFI application") -- `--oformat=binary` każe
+  # linkerowi wyprodukować surowy binarny blob bez nagłówka PE, co jest
+  # sprzeczne z `-Wl,--subsystem,10`/`-Wl,-e,efi_main` (opcje specyficzne
+  # dla PE) i kończyło się błędem linkera "cannot perform PE operations on
+  # non PE output file". mingw-w64 domyślnie i tak produkuje PE32+.
+  #
+  # zbootpkg/crt_shim.nim dostarcza resztę symboli C (memcpy/memset/
+  # calloc/strlen -- prawdziwe implementacje; signal/exit/fflush/fwrite/
+  # __acrt_iob_func/__main -- bezpieczne no-opy), których żąda linker przy
+  # `-nostdlib` (brak libc) -- bez tego linkowanie kończy się dziesiątkami
+  # "undefined reference to 'memcpy'" itd.
   exec "nim c -d:release --os:any --cpu:amd64 --mm:arc -d:useMalloc " &
        "--cc:gcc --gcc.exe:x86_64-w64-mingw32-gcc --gcc.linkerexe:x86_64-w64-mingw32-gcc " &
-       "--passC:\"-mabi=ms\" " &
-       "--passL:\"-nostdlib -Wl,--subsystem,10 -Wl,-e,efi_main -Wl,--oformat=binary\" " &
+       "--passC:\"-mabi=ms -masm=intel\" " &
+       "--passL:\"-nostdlib -Wl,--subsystem,10 -Wl,-e,efi_main\" " &
        "--out:bootloader/BOOTX64.EFI bootloader/zboot.nim"
 
 task buildAll, "Buduje wszystkie komponenty Nim (zesh, zsrv, zboot)":
