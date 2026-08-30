@@ -42,7 +42,7 @@ proc enableNoExecute*() =
 proc allocPageAligned(bs: ptr EfiBootServices, pages: uint64): uint64 =
   var address: uint64 = 0
   # AllocateAnyPages = 0, EfiLoaderData = 2
-  let status = bs.allocatePages(0'u32, 2'u32, pages, addr address)
+  let status = bs.allocatePages(0'u32, EfiMemoryType(2), pages.uint, addr address)
   if status != StatusSuccess:
     panic("nie udalo sie zaalokowac tablicy stron")
 
