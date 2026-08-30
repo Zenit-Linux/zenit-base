@@ -123,7 +123,7 @@ proc allocKernelPhysicalRegion*(bs: ptr EfiBootServices, spanBytes: uint64): uin
   let pages = (spanBytes + pageSize - 1) div pageSize
   var address: uint64 = 0
   # AllocateAnyPages = 0, EfiLoaderData = 2
-  let status = bs.allocatePages(0'u32, 2'u32, pages, addr address)
+  let status = bs.allocatePages(0'u32, EfiMemoryType(2), pages.uint, addr address)
   if status != StatusSuccess:
     panic("nie udalo sie zaalokowac fizycznego regionu na jadro (" & $spanBytes & " bajtow)")
   address
