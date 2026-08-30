@@ -1,4 +1,4 @@
-import std/[posix, os, times]
+import std/[posix, os, times, tables]
 import ./types
 import ./state
 import ./logger
@@ -31,7 +31,7 @@ type
     data:   EpollDataUnion
 
   SignalfdSiginfo {.importc: "struct signalfd_siginfo", header: "<sys/signalfd.h>", pure, final.} = object
-    ssiSigno: uint32
+    ssiSigno {.importc: "ssi_signo".}: uint32
     padding: array[124, uint8] # dopełnienie do pełnego rozmiaru struktury (128 B)
 
 proc epoll_create1(flags: cint): cint {.importc, header: "<sys/epoll.h>".}
@@ -49,7 +49,11 @@ proc setupSignalFd(): cint =
 
   # Blokujemy te sygnały w standardowym mechanizmie — będą odbierane
   # wyłącznie przez odczyt z signalfd w pętli zdarzeń.
-  discard sigprocmask(SIG_BLOCK, mask, nil)
+  # (`sigprocmask` w std/posix wymaga `var Sigset` dla OBU ostatnich
+  # argumentów -- nie akceptuje `nil` dla "nie interesuje mnie stara
+  # maska", stąd `oldMask`, jawnie nieużywany poza tym wywołaniem.)
+  var oldMask: Sigset
+  discard sigprocmask(SIG_BLOCK, mask, oldMask)
 
   let fd = signalfd(-1.cint, addr mask, SFD_NONBLOCK)
   if fd < 0:
