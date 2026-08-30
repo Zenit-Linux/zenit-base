@@ -80,13 +80,13 @@ proc loadKernelViaEsp*(imageHandle: EfiHandle, bs: ptr EfiBootServices): LoadedK
 
   # Krok 2: alokacja bufora dokładnie na rozmiar pliku i właściwy odczyt.
   var kernelBuffer: pointer
-  status = bs.allocatePool(2'u32, fileSize, addr kernelBuffer)
+  status = bs.allocatePool(EfiMemoryType(2), fileSize.uint, addr kernelBuffer)
   if status != StatusSuccess:
     efiPrint("[zboot] nie udalo sie zaalokowac bufora na obraz jadra\n")
     discard kernelFile.close(kernelFile)
     return
 
-  var readSize = fileSize
+  var readSize: uint = fileSize.uint
   status = kernelFile.read(kernelFile, addr readSize, kernelBuffer)
   discard kernelFile.close(kernelFile)
 
