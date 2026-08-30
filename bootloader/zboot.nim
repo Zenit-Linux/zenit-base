@@ -1,6 +1,7 @@
 {.push checks: off, stackTrace: off, lineTrace: off.}
 
 import zbootpkg/allocator
+import zbootpkg/crt_shim
 import zbootpkg/uefi_types
 import zbootpkg/console
 import zbootpkg/memory
@@ -32,6 +33,7 @@ proc efiMain(imageHandle: EfiHandle, systemTable: ptr EfiSystemTable): EfiStatus
   # ARC), a NimMain() musi zadziałać przed jakimkolwiek użyciem string/seq
   # (w tym pierwszym efiPrint poniżej).
   setAllocatorBootServices(systemTable.bootServices)
+  initCrtShim()
   NimMain()
 
   setSystemTable(systemTable)
