@@ -63,7 +63,14 @@
     false
     (let [sudo (sudo-)]
       (case pm
-        :apt (try-run (string sudo "apt-get update && " sudo "env DEBIAN_FRONTEND=noninteractive apt-get install -y " pkgs))
+        :apt (do
+               # `apt-get update` bywa niezerowy, jeśli JEDNO skonfigurowane
+               # źródło (np. martwe stare repo firmy trzeciej) nie odpowiada
+               # -- reszta list pakietów i tak się odświeża. Nie łączymy tego
+               # przez `&&` z `install`, żeby zepsute jedno źródło nie blokowało
+               # instalacji z pozostałych, działających repozytoriów.
+               (try-run (string sudo "apt-get update"))
+               (try-run (string sudo "env DEBIAN_FRONTEND=noninteractive apt-get install -y " pkgs)))
         :dnf (try-run (string sudo "dnf install -y " pkgs))
         :pacman (try-run (string sudo "pacman -Sy --noconfirm " pkgs))
         :zypper (try-run (string sudo "zypper --non-interactive install " pkgs))
@@ -99,24 +106,32 @@
 
 (defn ensure-janet []
   # `janet` -- brak w domyślnych repozytoriach wielu dystrybucji;
-  # próbujemy menedżera pakietów, a jeśli go nie ma, budujemy ze
-  # źródeł (`git clone` + `make` + `make install`, tak jak mówi
-  # README janet-lang/janet -- działa niezależnie od dystrybucji).
+  # próbujemy menedżera pakietów, a jeśli go nie ma (LUB pakiet się
+  # zainstalował, ale z jakiegoś powodu nie dał binarki -- stąd
+  # `have?` re-sprawdzane NIEZALEŻNIE od tego, czy `pm-install`
+  # zgłosił sukces), budujemy ze źródeł (`git clone` + `make` + `make
+  # install`, tak jak mówi README janet-lang/janet -- działa
+  # niezależnie od dystrybucji).
   (unless (have? "janet")
     (eprint "recipe.janet: brak 'janet' -- próbuję zainstalować (" (detect-pm) ")...")
-    (unless (pm-install {:apt "janet" :dnf "janet" :pacman "janet" :zypper "janet" :apk "janet" :brew "janet"})
-      (eprint "recipe.janet: menedżer pakietów nie ma 'janet' -- buduję ze źródeł (git clone + make install)...")
+    (pm-install {:apt "janet" :dnf "janet" :pacman "janet" :zypper "janet" :apk "janet" :brew "janet"})
+    (unless (have? "janet")
+      (eprint "recipe.janet: 'janet' nadal niedostępne -- buduję ze źródeł (git clone + make install)...")
       (build-janet-from-source)))
   (unless (have? "janet")
     (fail "nie udało się zapewnić 'janet' -- zainstaluj ręcznie (https://janet-lang.org) i uruchom ponownie")))
 
 (defn ensure-nim []
   # nim/nimble -- pakiet dystrybucyjny, w ostateczności choosenim
-  # (oficjalny instalator, nie wymaga roota).
+  # (oficjalny instalator, nie wymaga roota). Re-sprawdzamy `have?`
+  # niezależnie od tego, czy `pm-install` zgłosił sukces -- pakiet
+  # dystrybucyjny czasem "instaluje się" bez realnego dostarczenia
+  # oczekiwanej binarki.
   (unless (have? "nimble")
     (eprint "recipe.janet: brak 'nimble' (Nim) -- próbuję zainstalować (" (detect-pm) ")...")
-    (unless (pm-install {:apt "nim" :dnf "nim" :pacman "nim" :zypper "nim" :apk "nim" :brew "nim"})
-      (eprint "recipe.janet: menedżer pakietów nie ma 'nim' -- próbuję choosenim (oficjalny instalator)...")
+    (pm-install {:apt "nim" :dnf "nim" :pacman "nim" :zypper "nim" :apk "nim" :brew "nim"})
+    (unless (have? "nimble")
+      (eprint "recipe.janet: 'nimble' nadal niedostępne -- próbuję choosenim (oficjalny instalator)...")
       (try-run "curl https://nim-lang.org/choosenim/init.sh -sSf | sh -s -- -y")
       (def nim-bin-dir (string (os/getenv "HOME") "/.nimble/bin"))
       (when (os/stat (string nim-bin-dir "/nimble") :mode)
@@ -125,13 +140,21 @@
     (fail "nie udało się zapewnić 'nimble' (Nim >= 2.0.0) -- zainstaluj ręcznie (https://nim-lang.org/install.html) i uruchom ponownie")))
 
 (defn ensure-crystal []
-  # crystal/shards -- pakiet dystrybucyjny, w ostateczności oficjalny
-  # skrypt instalacyjny Crystala (sam wykrywa dystrybucję i dobiera
-  # metodę -- apt/yum/pacman/curl+tar -- patrz crystal-lang.org/install).
+  # crystal + shards -- na wielu dystrybucjach (m.in. Debian/Ubuntu)
+  # to DWA OSOBNE pakiety apt ("crystal" i "shards"), mimo że
+  # crystal-lang.org opisuje shards jako "zwykle dystrybuowane razem
+  # z Crystalem" -- stąd oba w jednym poleceniu instalacji. Tak samo
+  # jak wyżej: re-sprawdzamy `have? "shards"` NIEZALEŻNIE od tego, czy
+  # `pm-install` zgłosił sukces (sam apt install "crystal" bez
+  # "shards" kończy się kodem 0, a mimo to nie daje działającego
+  # `shards`), i dopiero wtedy sięgamy po oficjalny skrypt
+  # instalacyjny (repo DEB/RPM crystal-lang.org, wspiera więcej
+  # dystrybucji niż same nazwy pakietów niżej).
   (unless (have? "shards")
     (eprint "recipe.janet: brak 'shards' (Crystal) -- próbuję zainstalować (" (detect-pm) ")...")
-    (unless (pm-install {:apt "crystal" :dnf "crystal" :pacman "crystal" :zypper "crystal" :apk "crystal" :brew "crystal"})
-      (eprint "recipe.janet: menedżer pakietów nie ma 'crystal' -- próbuję oficjalnego skryptu instalacyjnego...")
+    (pm-install {:apt "crystal shards" :dnf "crystal shards" :pacman "crystal shards" :zypper "crystal shards" :apk "crystal shards" :brew "crystal"})
+    (unless (have? "shards")
+      (eprint "recipe.janet: 'shards' nadal niedostępne po instalacji pakietu dystrybucyjnego -- próbuję oficjalnego skryptu instalacyjnego (repo DEB/RPM crystal-lang.org)...")
       (when (try-run "curl -fsSL https://crystal-lang.org/install.sh -o /tmp/zpk-crystal-install.sh && chmod +x /tmp/zpk-crystal-install.sh")
         (try-run (string (sudo-) "bash /tmp/zpk-crystal-install.sh")))))
   (unless (have? "shards")
