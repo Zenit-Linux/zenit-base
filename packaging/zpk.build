@@ -1,1 +1,18 @@
+package {
+  name        = "zenit-base"
+  version     = "0.1.0"
+  arch        = ["x86_64"]
+  description = "Zenit Base -- rdzenne narzedzia Zenit Linux: powloka zesh, init zsrv (PID 1), bootloader zboot (UEFI, best-effort) i zestaw ~35 narzedzi CLI (Crystal) budowanych jednym uruchomieniem janet build.janet"
+  depends_on  = []
+}
 
+recipe {
+  file = "recipe.janet"
+  lang = "janet"
+}
+
+release {
+  repo       = "https://github.com/Zenit-Linux/own-repository"
+  repo_file  = "repo/own-repository.json"
+  asset_name = "zenit-base"
+}
