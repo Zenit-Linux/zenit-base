@@ -1,6 +1,27 @@
 require "option_parser"
 
+# gr — nowoczesna alternatywa dla `chgrp` (Zenit Linux)
+#
+# NAPRAWIONE: tak samo jak w `tools/ow/src/ow.cr` — `LibC.getgrnam` i
+# `LibC.chown` nie są zdefiniowane w domyślnie ładowanym module `LibC`
+# w tej instalacji Crystal. Naprawione przez własny, minimalny
+# `lib LibGr` z dokładnie potrzebnymi strukturą i funkcjami, plus
+# poprawny `.null?` zamiast traktowania wskaźnika jako "falsy" (w
+# Crystalu `Pointer(T)` jest zawsze prawdziwy, nawet gdy null).
+
 VERSION = "0.1.0"
+
+lib LibGr
+  struct Group
+    gr_name : LibC::Char*
+    gr_passwd : LibC::Char*
+    gr_gid : LibC::GidT
+    gr_mem : LibC::Char**
+  end
+
+  fun getgrnam(name : LibC::Char*) : Group*
+  fun chown(path : LibC::Char*, owner : LibC::UidT, group : LibC::GidT) : LibC::Int
+end
 
 recursive = false
 verbose   = false
@@ -24,12 +45,13 @@ group_name = args[0]
 paths = args[1..]
 
 def resolve_gid(name : String) : LibC::GidT
-  if gr = LibC.getgrnam(name)
-    gr.value.gr_gid
-  else
-    name.to_i32.to_u32
+  gr = LibGr.getgrnam(name)
+  return gr.value.gr_gid unless gr.null?
+
+  if n = name.to_i32?
+    return n.to_u32
   end
-rescue ArgumentError
+
   STDERR.puts "gr: nieznana grupa '#{name}'"
   exit 1
 end
@@ -38,7 +60,7 @@ gid = resolve_gid(group_name)
 
 def chgrp_path(path : String, gid, recursive : Bool, verbose : Bool)
   # -1 jako uid oznacza „nie zmieniaj właściciela”
-  if LibC.chown(path, LibC::UidT.new(-1), gid) != 0
+  if LibGr.chown(path, LibC::UidT.new(-1), gid) != 0
     STDERR.puts "gr: nie można zmienić grupy '#{path}'"
   elsif verbose
     puts "gr: zmieniono grupę '#{path}'"
