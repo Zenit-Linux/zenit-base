@@ -25,14 +25,49 @@ end
 parser.parse
 
 # Pobranie informacji o systemie przez syscall uname(2).
-uts = uninitialized LibC::UtsnameT
-LibC.uname(pointerof(uts))
+#
+# NAPRAWIONE (2x): pierwsza wersja miała literówkę `LibC::UtsnameT`
+# zamiast `LibC::Utsname`. Poprawiona nazwa też jednak nie działała —
+# `LibC::Utsname` w ogóle nie istnieje w tej instalacji Crystal, bo
+# binding do `struct utsname` z <sys/utsname.h> NIE jest częścią
+# domyślnie załadowanego modułu `LibC` (to osobny plik w drzewie stdlib,
+# dociągany tylko przez pewne wyższopoziomowe require, których tu nie
+# używamy) — stąd "undefined constant LibC::Utsname".
+#
+# Rozwiązanie: zamiast polegać na tym, czy dana wersja/dystrybucja
+# Crystala akurat zdefiniowała ten binding, definiujemy WŁASNY,
+# minimalny `lib` z dokładnie tym, czego potrzebujemy. `_UTSNAME_LENGTH`
+# (rozmiar każdego pola) to stała 65 w glibc na Linuksie — składnia
+# `UInt8[65]` w bloku `lib` to zwykła tablica stałej długości (C-owe
+# `char sysname[65]`), niezależna od tego, czy `LibC` ją gdzieś już
+# zdefiniował. Sama funkcja `uname` i tak linkuje się do tego samego
+# symbolu C `uname` z libc, więc zachowanie jest identyczne.
+lib LibAbout
+  UTSNAME_LENGTH = 65
 
-sysname  = String.new(pointerof(uts.sysname))
-nodename = String.new(pointerof(uts.nodename))
-release  = String.new(pointerof(uts.release))
-kversion = String.new(pointerof(uts.version))
-machine  = String.new(pointerof(uts.machine))
+  struct Utsname
+    sysname : UInt8[65]
+    nodename : UInt8[65]
+    release : UInt8[65]
+    version : UInt8[65]
+    machine : UInt8[65]
+    domainname : UInt8[65]
+  end
+
+  fun uname(buf : Utsname*) : LibC::Int
+end
+
+uts = uninitialized LibAbout::Utsname
+LibAbout.uname(pointerof(uts))
+
+# Pola są już `UInt8[65]` (StaticArray(UInt8, 65)), więc `.to_unsafe`
+# daje wprost `Pointer(UInt8)`, dokładnie tego, czego oczekuje `String.new`
+# — bez potrzeby dodatkowego rzutowania `.as(UInt8*)`.
+sysname  = String.new(uts.sysname.to_unsafe)
+nodename = String.new(uts.nodename.to_unsafe)
+release  = String.new(uts.release.to_unsafe)
+kversion = String.new(uts.version.to_unsafe)
+machine  = String.new(uts.machine.to_unsafe)
 
 if !(show_all || show_kernel || show_hostname || show_release || show_version || show_machine)
   show_kernel = true
