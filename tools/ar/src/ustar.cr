@@ -38,7 +38,9 @@ module Ustar
   private def self.get_ascii(header : Bytes, offset : Int32, width : Int32) : String
     slice = header[offset, width]
     stop = 0
-    stop += 1 while stop < slice.size && slice[stop] != 0
+    while stop < slice.size && slice[stop] != 0
+      stop += 1
+    end
     String.new(slice[0, stop])
   end
 
