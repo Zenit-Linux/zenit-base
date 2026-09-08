@@ -234,3 +234,134 @@ describe "zn (find)" do
     end
   end
 end
+
+describe "about (uname)" do
+  it "domyślnie wypisuje nazwę jądra" do
+    result = run_tool("about")
+    result[:status].success?.should be_true
+    result[:stdout].strip.empty?.should be_false
+  end
+
+  it "-a wypisuje wszystkie pola oddzielone spacjami" do
+    result = run_tool("about", ["-a"])
+    result[:status].success?.should be_true
+    result[:stdout].split(" ").size.should be >= 5
+  end
+
+  it "--json wypisuje prawidłowy obiekt JSON" do
+    result = run_tool("about", ["--json"])
+    result[:stdout].strip.starts_with?("{").should be_true
+    result[:stdout].should contain(%("sysname"))
+  end
+end
+
+describe "gdz (which)" do
+  it "znajduje polecenie istniejące w $PATH" do
+    result = run_tool("gdz", ["sh"])
+    result[:status].success?.should be_true
+    result[:stdout].strip.empty?.should be_false
+  end
+
+  it "-a wypisuje wszystkie dopasowania, po jednym na linię" do
+    result = run_tool("gdz", ["-a", "sh"])
+    result[:status].success?.should be_true
+    result[:stdout].lines.size.should be >= 1
+  end
+
+  it "zwraca błąd dla nieistniejącego polecenia" do
+    result = run_tool("gdz", ["polecenie-ktorego-na-pewno-nie-ma-xyz"])
+    result[:status].success?.should be_false
+  end
+end
+
+describe "un (uniq) --repeated/--unique" do
+  it "-d wypisuje tylko linie powtórzone" do
+    with_tmp_dir do |dir|
+      f = File.join(dir, "in.txt")
+      File.write(f, "a\na\nb\nc\nc\nc\n")
+      result = run_tool("un", ["-d", f])
+      result[:stdout].should eq("a\nc\n")
+    end
+  end
+
+  it "-u wypisuje tylko linie niepowtórzone" do
+    with_tmp_dir do |dir|
+      f = File.join(dir, "in.txt")
+      File.write(f, "a\na\nb\nc\nc\nc\n")
+      result = run_tool("un", ["-u", f])
+      result[:stdout].should eq("b\n")
+    end
+  end
+end
+
+describe "so (sort) -k/-t" do
+  it "sortuje wg wybranego pola z niestandardowym separatorem" do
+    with_tmp_dir do |dir|
+      f = File.join(dir, "in.txt")
+      File.write(f, "3:c\n1:a\n2:b\n")
+      result = run_tool("so", ["-t", ":", "-k", "1", f])
+      result[:stdout].should eq("1:a\n2:b\n3:c\n")
+    end
+  end
+end
+
+describe "lb (wc) -m/-L" do
+  it "-m liczy znaki UTF-8, nie bajty" do
+    with_tmp_dir do |dir|
+      f = File.join(dir, "in.txt")
+      File.write(f, "łąka\n") # 4 znaki, ale więcej niż 4 bajty w UTF-8
+      result = run_tool("lb", ["-m", f])
+      result[:stdout].strip.split(" ")[0].should eq("5") # 4 znaki + \n
+    end
+  end
+
+  it "-L zwraca długość najdłuższej linii" do
+    with_tmp_dir do |dir|
+      f = File.join(dir, "in.txt")
+      File.write(f, "krótka\ntonajdluzszalinia\nśr\n")
+      result = run_tool("lb", ["-L", f])
+      result[:stdout].strip.split(" ")[0].should eq("17")
+    end
+  end
+end
+
+describe "wz (ln) -t" do
+  it "tworzy dowiązania dla wielu celów w jednym katalogu" do
+    with_tmp_dir do |dir|
+      target_dir = File.join(dir, "linki")
+      Dir.mkdir(target_dir)
+      f1 = File.join(dir, "a.txt")
+      f2 = File.join(dir, "b.txt")
+      File.write(f1, "a")
+      File.write(f2, "b")
+
+      result = run_tool("wz", ["-s", "-t", target_dir, f1, f2])
+      result[:status].success?.should be_true
+      File.symlink?(File.join(target_dir, "a.txt")).should be_true
+      File.symlink?(File.join(target_dir, "b.txt")).should be_true
+    end
+  end
+end
+
+describe "pf (printf) szerokość/precyzja" do
+  it "obsługuje szerokość i zero-padding dla %d" do
+    result = run_tool("pf", ["[%05d]", "42"])
+    result[:stdout].should eq("[00042]")
+  end
+
+  it "obsługuje precyzję dla %f" do
+    result = run_tool("pf", ["%.2f", "3.14159"])
+    result[:stdout].should eq("3.14")
+  end
+end
+
+describe "wp (cat) -A" do
+  it "-A wypisuje $ na końcu linii i taby jako ^I" do
+    with_tmp_dir do |dir|
+      f = File.join(dir, "in.txt")
+      File.write(f, "a\tb\n")
+      result = run_tool("wp", ["-A", f])
+      result[:stdout].should eq("a^Ib$\n")
+    end
+  end
+end
