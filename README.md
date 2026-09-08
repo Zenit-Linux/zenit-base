@@ -3,7 +3,7 @@
 **Zenit Linux** to dystrybucja Linuksa budowana od zera, uzależniona od GNU
 (libc, toolchain itd.), ale zastępująca klasyczne narzędzia coreutils
 własnymi, nowoczesnymi odpowiednikami — a docelowo także własnym
-bootloaderem i systemem init.
+bootloaderem i systemem init. Można podczas instalacji wybrac zamiast ekosystemu zenit base ekosystem gnu.
 
 ## Filozofia
 
