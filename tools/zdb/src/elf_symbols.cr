@@ -16,7 +16,9 @@ module ElfSymbols
   private def self.read_cstring(data : Bytes, offset : Int32) : String
     return "" if offset < 0 || offset >= data.size
     stop = offset
-    stop += 1 while stop < data.size && data[stop] != 0
+    while stop < data.size && data[stop] != 0
+      stop += 1
+    end
     String.new(data[offset, stop - offset])
   end
 
