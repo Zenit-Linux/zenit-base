@@ -198,17 +198,23 @@
 (ensure-dir (string stage "/usr"))
 (ensure-dir bin-dir)
 
-# Wszystko w dist/ poza BOOTX64.EFI to zwykła binarka CLI (zesh, zsrv,
-# ~35 narzędzi Crystal) -- ląduje w usr/bin/. BOOTX64.EFI to obraz
-# UEFI, nie binarka do uruchomienia z powłoki -- ląduje osobno, w
-# miejscu specyficznym dla pakietu (patrz komentarz niżej), nie
-# bezpośrednio w /boot/efi (żaden pakiet nie powinien milcząco pisać
-# do ESP -- to zadanie instalatora/administratora systemu).
+# Wszystko w dist/ poza BOOTX64.EFI (UEFI) i zboot-bios-stage{1,2}.bin
+# (BIOS) to zwykła binarka CLI (zesh, zsrv, ~35 narzędzi Crystal) --
+# ląduje w usr/bin/. Obrazy bootloadera nie są binarkami do uruchomienia
+# z powłoki (BOOTX64.EFI to obraz PE32+ dla UEFI; zboot-bios-stage{1,2}.bin
+# to surowe binarne bloby real-mode/16-bit -- `chmod +x` na nich byłoby
+# bez sensu, a wrzucenie do usr/bin myliłoby użytkownika, że to coś, co
+# można uruchomić z powłoki) -- lądują osobno, w miejscu specyficznym dla
+# pakietu (patrz komentarz niżej), nie bezpośrednio w /boot/efi ani na
+# MBR dysku (żaden pakiet nie powinien milcząco pisać do ESP/MBR -- to
+# zadanie instalatora/administratora systemu).
 (def bootloader-name "BOOTX64.EFI")
+(def bios-stage-names ["zboot-bios-stage1.bin" "zboot-bios-stage2.bin"])
+(def non-cli-names (array/push (array ;bios-stage-names) bootloader-name))
 (var staged-count 0)
 
 (each entry (os/dir dist-dir)
-  (unless (= entry bootloader-name)
+  (unless (find |(= $ entry) non-cli-names)
     (def src (string dist-dir "/" entry))
     (when (= (os/stat src :mode) :file)
       (def dest (string bin-dir "/" entry))
@@ -220,7 +226,25 @@
   (fail (string "w " dist-dir " nie znaleziono ani jednej binarki do zapakowania")))
 
 (def bootloader-src (string dist-dir "/" bootloader-name))
+(def boot-dir (string stage "/usr/lib/zenit-base/boot"))
+
 (when (os/stat bootloader-src :mode)
-  (def boot-dir (string stage "/usr/lib/zenit-base/boot"))
   (ensure-dir-p boot-dir)
   (spit (string boot-dir "/" bootloader-name) (slurp bootloader-src)))
+
+# stage1.bin/stage2.bin (backend BIOS, patrz bootloader/bios/) --
+# najlepszym wysiłkiem: `janet build.janet` sam już traktuje brak nasm
+# lub błąd asemblacji jako niekrytyczny (loguje i kontynuuje resztę
+# budowy, patrz ensure-nasm/build-nim-system w build.janet), więc te
+# pliki mogą po prostu nie istnieć w dist/ -- to NIE jest błąd pakowania.
+(var bios-staged-count 0)
+(each name bios-stage-names
+  (def src (string dist-dir "/" name))
+  (when (os/stat src :mode)
+    (ensure-dir-p boot-dir)
+    (spit (string boot-dir "/" name) (slurp src))
+    (++ bios-staged-count)))
+
+(if (> bios-staged-count 0)
+  (eprint "recipe.janet: zapakowano backend BIOS bootloadera (" bios-staged-count "/" (length bios-stage-names) " plików) do " boot-dir)
+  (eprint "recipe.janet: backend BIOS bootloadera nieobecny w dist/ (nasm niedostępny lub asemblacja zawiodła) -- pomijam, to nie jest błąd pakowania"))
