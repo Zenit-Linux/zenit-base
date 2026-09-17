@@ -5,6 +5,7 @@ import ./logger
 import ./supervisor
 import ./target
 import ./parser
+import ./control
 
 # --------------------------------------------------------------------------
 # Bindingi niskiego poziomu: epoll + signalfd (Linux).
@@ -76,20 +77,26 @@ proc handleSignal(signo: uint32) =
       log("zsrv: przelaczanie targetu '" & $currentTarget & "' -> '" & $newTarget & "'")
       currentTarget = newTarget
 
-    applyTarget(currentTarget)
+    applyTarget(currentTarget, force = true)
   else:
     discard
 
 proc mainLoop*() =
   let sfd = setupSignalFd()
   let epfd = epoll_create1(0)
+  let cfd = setupControlSocket() # gniazdo kontrolne dla zsrvctl, patrz zsrvpkg/control
 
   if sfd >= 0 and epfd >= 0:
     var ev = EpollEvent(events: EPOLLIN)
     ev.data.fd = sfd
     discard epoll_ctl(epfd, EPOLL_CTL_ADD, sfd, addr ev)
 
-  applyTarget(currentTarget)
+  if cfd >= 0 and epfd >= 0:
+    var ev = EpollEvent(events: EPOLLIN)
+    ev.data.fd = cfd
+    discard epoll_ctl(epfd, EPOLL_CTL_ADD, cfd, addr ev)
+
+  applyTarget(currentTarget, force = true) # zastosowanie stanu poczatkowego przy starcie zsrv
 
   while not shuttingDown:
     if epfd < 0 or sfd < 0:
@@ -113,6 +120,15 @@ proc mainLoop*() =
           let bytesRead = read(sfd, addr info, sizeof(SignalfdSiginfo))
           if bytesRead == sizeof(SignalfdSiginfo):
             handleSignal(info.ssiSigno)
+        elif events[i].data.fd == cfd:
+          # Może być kilka połączeń oczekujących naraz (np. skrypt
+          # wywołujący `zsrvctl` kilka razy pod rząd) — odbieramy je
+          # wszystkie, dopóki accept() nie zwróci błędu (brak kolejnych).
+          while true:
+            let connFd = acceptControlConnection()
+            if connFd < 0:
+              break
+            handleControlConnection(connFd)
 
     processPendingRestarts()
     processStopEscalations()
@@ -135,4 +151,5 @@ proc mainLoop*() =
       break
     sleep(100)
 
+  closeListener()
   log("zsrv: zamykanie systemu zakończone")
