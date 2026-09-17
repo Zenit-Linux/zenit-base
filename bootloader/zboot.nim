@@ -21,11 +21,27 @@ import zbootpkg/handoff
 # zainicjalizowane.
 proc NimMain() {.importc: "NimMain", cdecl.}
 
-# Ile GiB niskiej pamięci fizycznej identity-mapujemy w nowych tablicach
-# stron — musi pokrywać wszystkie bufory zboot (mapa pamięci, BootInfo,
-# stos) oraz strukturę samych tablic stron. TODO: wyliczać dynamicznie
-# z mapy pamięci zamiast stałej.
-const IdentityMapGiB = 4'u64
+# Dolna granica identity-mappingu — nawet na maszynach z bardzo mało RAM-u
+# (raportujących niski maxPhysicalAddress) chcemy mieć zapas na bufory
+# zboot (mapa pamięci, BootInfo, stos) i same tablice stron.
+const MinIdentityMapGiB = 4'u64
+# Górna granica jako zabezpieczenie przed absurdalnie dużą liczbą wpisów
+# w mapie pamięci (np. wadliwy firmware zgłaszający fikcyjny region przy
+# adresie bliskim 2^64) prowadzącą do budowania identity-mappingu na
+# nierealistyczną liczbę gigabajtów.
+const MaxIdentityMapGiB = 512'u64
+const GiB = 1024'u64 * 1024'u64 * 1024'u64
+
+proc computeIdentityMapGiB(mmap: MemoryMapResult): uint64 =
+  ## Wylicza, ile GiB niskiej pamięci fizycznej trzeba identity-mapować,
+  ## na podstawie najwyższego adresu fizycznego zgłoszonego przez firmware
+  ## w mapie pamięci (zaokrąglone w górę do pełnego GiB), przycięte do
+  ## [MinIdentityMapGiB, MaxIdentityMapGiB].
+  let maxAddr = mmap.maxPhysicalAddress()
+  var gib = (maxAddr + GiB - 1'u64) div GiB # zaokrąglenie w górę
+  if gib < MinIdentityMapGiB: gib = MinIdentityMapGiB
+  if gib > MaxIdentityMapGiB: gib = MaxIdentityMapGiB
+  gib
 
 proc efiMain(imageHandle: EfiHandle, systemTable: ptr EfiSystemTable): EfiStatus {.exportc: "efi_main", cdecl.} =
   # Kolejność ma znaczenie: alokator musi być gotowy PRZED NimMain()
@@ -53,10 +69,19 @@ proc efiMain(imageHandle: EfiHandle, systemTable: ptr EfiSystemTable): EfiStatus
     panic("obraz jadra nie jest poprawnym plikiem ELF64")
 
   efiPrintHex("[zboot] punkt wejscia jadra", parsed.entryPoint)
-  efiPrint("[zboot] liczba segmentow PT_LOAD: " & $parsed.segments.len & "\n")
+  efiPrint("[zboot] liczba segmentow PT_LOAD: ")
+  efiPrintUInt(uint64(parsed.segmentCount))
+  efiPrint("\n")
 
   let mmap = getMemoryMap(bs)
-  efiPrint("[zboot] dostepna pamiec (przyblizenie): " & $(mmap.totalUsableBytes() div (1024*1024)) & " MiB\n")
+  efiPrint("[zboot] dostepna pamiec (przyblizenie): ")
+  efiPrintUInt(mmap.totalUsableBytes() div (1024*1024))
+  efiPrint(" MiB\n")
+
+  let identityMapGiB = computeIdentityMapGiB(mmap)
+  efiPrint("[zboot] identity mapping: ")
+  efiPrintUInt(identityMapGiB)
+  efiPrint(" GiB (wyliczone z mapy pamieci)\n")
 
   let fb = getFramebufferInfo(bs)
 
@@ -74,7 +99,15 @@ proc efiMain(imageHandle: EfiHandle, systemTable: ptr EfiSystemTable): EfiStatus
   # Krok 2: zbuduj tablice stron ODWZOROWUJĄCE prawdziwy (higher-half lub
   # niski) adres wirtualny jądra na adres fizyczny z kroku 1, plus
   # identity mapping niskiej pamięci dla własnych struktur zboot.
-  let pageTables = buildPageTables(bs, IdentityMapGiB, lowestVaddr, kernelPhysBase, parsed.segments)
+  let pageTables = buildPageTables(bs, identityMapGiB, lowestVaddr, kernelPhysBase, parsed.segments, parsed.segmentCount)
+
+  # Krok 3: dedykowany stos jądra z guard page'em POD nim (patrz
+  # handoff.allocKernelStack / paging.punchGuardPage) — obie operacje
+  # MUSZĄ nastąpić przed ExitBootServices (potrzebują `bs`).
+  let (kernelStackTop, guardPhys) = allocKernelStack(bs)
+  punchGuardPage(bs, pageTables.pml4Phys, guardPhys)
+  efiPrintHex("[zboot] stos jadra (szczyt)", kernelStackTop)
+  efiPrintHex("[zboot] guard page pod stosem jadra", guardPhys)
 
   efiPrint("[zboot] wychodze z Boot Services...\n")
   var exitStatus = bs.exitBootServices(imageHandle, mmap.mapKey)
@@ -88,12 +121,14 @@ proc efiMain(imageHandle: EfiHandle, systemTable: ptr EfiSystemTable): EfiStatus
     if exitStatus != StatusSuccess:
       panic("ExitBootServices() nie powiodlo sie nawet po ponownej probie")
 
+  markBootServicesExited() # patrz zbootpkg/console -- odblokowuje `hlt` w panic()
+
   # Od tego momentu żadne usługi firmware (w tym konsola/efiPrint) nie są
   # już dostępne — stąd przełączenie tablic stron następuje dopiero teraz.
   activate(pageTables)
 
   var bootInfo = buildBootInfo(finalMmap, kernelPhysBase, parsed.entryPoint, fb)
-  jumpToKernel(addr bootInfo)
+  jumpToKernel(addr bootInfo, kernelStackTop)
 
   StatusSuccess
 
