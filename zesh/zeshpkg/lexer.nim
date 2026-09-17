@@ -2,7 +2,11 @@ import ./vars
 
 type
   TokenKind* = enum
-    tkWord, tkPipe, tkRedirIn, tkRedirOut, tkRedirAppend, tkSeq, tkAnd, tkOr, tkBackground
+    tkWord, tkPipe, tkRedirIn, tkRedirOut, tkRedirAppend, tkSeq, tkAnd, tkOr, tkBackground,
+    tkRedirErr, tkRedirErrAppend, tkRedirErrToOut
+    ## tkRedirErr        = `2>`   (przekierowanie stderr do pliku, obcinając)
+    ## tkRedirErrAppend  = `2>>`  (jak wyżej, ale dopisując)
+    ## tkRedirErrToOut   = `2>&1` (scalenie stderr ze stdout — bez nazwy pliku po tokenie)
 
   Token* = object
     kind*: TokenKind
@@ -88,6 +92,25 @@ proc tokenize*(line: string): seq[Token] =
       flush()
       tokens.add(Token(kind: tkRedirIn, text: "<"))
       inc i
+    of '2':
+      # `2>`/`2>>`/`2>&1` (przekierowanie stderr) są rozpoznawane TYLKO
+      # gdy `2` stoi na początku nowego tokenu (nie jest częścią
+      # dłuższego słowa, np. pliku o nazwie zaczynającej się od "2") —
+      # dokładnie tak, jak deskryptory plików działają w bashu.
+      if unquotedRun.len == 0 and not haveCurrent and
+         i + 1 < line.len and line[i + 1] == '>':
+        if i + 2 < line.len and line[i + 2] == '>':
+          tokens.add(Token(kind: tkRedirErrAppend, text: "2>>"))
+          i += 3
+        elif i + 3 < line.len and line[i + 2] == '&' and line[i + 3] == '1':
+          tokens.add(Token(kind: tkRedirErrToOut, text: "2>&1"))
+          i += 4
+        else:
+          tokens.add(Token(kind: tkRedirErr, text: "2>"))
+          i += 2
+      else:
+        unquotedRun &= c
+        inc i
     of '$':
       if i + 1 < line.len and line[i + 1] == '(':
         # Substytucja poleceń $(...) MUSI zostać połknięta w całości tutaj,
