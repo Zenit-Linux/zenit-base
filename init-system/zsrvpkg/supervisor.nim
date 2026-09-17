@@ -1,16 +1,36 @@
-import std/[os, posix, strutils, sequtils, times, tables]
+import std/[os, posix, sequtils, strutils, times, tables, sets]
 import ./types
 import ./state
 import ./logger
 import ./cgroups
 import ./depgraph
+import ./parser
 
-const ServiceLogDir = "/var/log/zenit"
+const ServiceLogDir* = "/var/log/zenit"
+
+var warnedMissingDeps: HashSet[string] = initHashSet[string]()
+  ## Klucz to "usługa->zależność" -- pilnuje, żeby to samo ostrzeżenie nie
+  ## zalewało logu przy każdym przebiegu `applyTarget` (usługa czekająca
+  ## na nieistniejącą zależność jest sprawdzana wielokrotnie, dopóki
+  ## `after` nie zostanie spełnione albo usługa nie wystartuje mimo to).
 
 proc dependenciesSatisfied(svc: ServiceRuntime): bool =
+  ## Rozstrzygnięcie wcześniejszego TODO ("traktować brakującą zależność
+  ## jako błąd twardy?"): NIE — literówka albo usunięta usługa w `After=`
+  ## nie może zablokować rozruchu CAŁEGO systemu w nieskończoność (tak jak
+  ## systemd traktuje nierozwiązane `After=` łagodnie, w odróżnieniu od
+  ## `Requires=`, którego ten prosty format w ogóle nie ma). Zamiast tego:
+  ## zaloguj WYRAŹNE ostrzeżenie (raz na parę usługa/zależność, nie przy
+  ## każdym przebiegu) i traktuj taką zależność jako spełnioną — admin
+  ## zobaczy w logu, że coś jest nie tak, ale reszta usług i tak wystartuje.
   for dep in svc.def.after:
     if dep notin services:
-      continue # brakująca zależność — TODO: traktować jako błąd twardy?
+      let warnKey = svc.def.name & "->" & dep
+      if warnKey notin warnedMissingDeps:
+        warnedMissingDeps.incl(warnKey)
+        log("zsrv: usługa '" & svc.def.name & "' ma w After= nieistniejącą usługę '" &
+            dep & "' — ignoruję tę zależność (literówka w pliku .zsrv?)")
+      continue
     if services[dep].state != ssRunning:
       return false
   true
@@ -56,6 +76,22 @@ proc stopService*(name: string)
   ## kompilacja `zsrv.nim` kończy się błędem "undeclared identifier:
   ## 'stopService'" dokładnie w miejscu wywołania w linii poniżej.
 
+proc applyServiceEnvironment(pairs: seq[string]) =
+  ## Wywoływane W PROCESIE POTOMNYM, po fork(), przed execvp(): ustawia
+  ## dodatkowe zmienne środowiskowe z `Environment=` (patrz zsrvpkg/parser)
+  ## przez `putEnv`. Proces potomny i tak dziedziczy resztę środowiska
+  ## PID 1 przez zwykły fork() — to TYLKO dokłada/nadpisuje wybrane
+  ## klucze, nie zeruje reszty odziedziczonego środowiska.
+  for pair in pairs:
+    let parts = pair.split('=', 1)
+    if parts.len != 2:
+      # stderr trafia już do LOGU USŁUGI, nie do konsoli PID 1 -- w tym
+      # miejscu jesteśmy PO redirectServiceOutput(), więc to dokładnie
+      # tam, gdzie administrator tej usługi to zobaczy.
+      stderr.writeLine("zsrv: Environment= wpis bez '=': '" & pair & "' -- pomijam")
+      continue
+    putEnv(parts[0], parts[1])
+
 proc startService*(name: string) =
   if name notin services:
     log("zsrv: próba uruchomienia nieznanej usługi '" & name & "'")
@@ -75,6 +111,7 @@ proc startService*(name: string) =
   createServiceCgroup(name, svc.def.limits)
 
   svc.state = ssStarting
+  svc.stoppedByAdmin = false # jawny start zawsze wygrywa z wcześniejszym stop
   services[name] = svc
 
   let pid = fork()
@@ -91,10 +128,12 @@ proc startService*(name: string) =
     discard setsid() # własne PGID — pozwala potem zabić CAŁĄ grupę (dzieci usługi też)
     attachPidToCgroup(name, getpid().int32)
     redirectServiceOutput(name)
+    if svc.def.environment.len > 0:
+      applyServiceEnvironment(svc.def.environment)
     if svc.def.user.len > 0:
       dropPrivileges(svc.def.user)
 
-    let parts = svc.def.execStart.splitWhitespace()
+    let parts = tokenizeExecLine(svc.def.execStart)
     if parts.len == 0:
       quit(1)
     let cArgs = allocCStringArray(parts)
@@ -110,15 +149,27 @@ proc startService*(name: string) =
 proc servicesForTarget*(target: Target): seq[string] =
   toSeq(services.keys).filterIt(target in services[it].def.wantedBy)
 
-proc applyTarget*(target: Target) =
+proc applyTarget*(target: Target, force: bool = false) =
   ## Uruchamia (w poprawnej kolejności zależności) wszystkie usługi
   ## należące do danego targetu, które nie są jeszcze uruchomione, ORAZ
   ## zatrzymuje usługi DZIAŁAJĄCE, które nie należą do aktywnego targetu
   ## (np. usługi tylko-multi-user po przełączeniu na rescue).
+  ##
+  ## `force` (domyślnie false) rozstrzyga, czy pomijać usługi zatrzymane
+  ## JAWNIE (`stoppedByAdmin`, patrz types.nim) przy autostarcie:
+  ## - `force=false` (WYWOŁANIA CYKLICZNE z pętli zdarzeń, "dokładanie"
+  ##   usług czekających na zależność) -- POMIJA je, żeby `zsrvctl stop`
+  ##   faktycznie coś znaczyło, a nie było cofane w mniej niż sekundę
+  ##   przez najbliższy obrót pętli zdarzeń;
+  ## - `force=true` (start systemu, `SIGHUP`/`isolate`/przełączenie
+  ##   targetu) -- startuje WSZYSTKO, co należy do docelowego targetu,
+  ##   niezależnie od wcześniejszych `stop` -- zgodnie z oczekiwaniem, że
+  ##   jawne przełączenie targetu w pełni odzwierciedla jego deklarowany
+  ##   stan (`startService` i tak czyści `stoppedByAdmin` przy starcie).
   let names = servicesForTarget(target)
   let order = topologicalStartOrder(names)
   for name in order:
-    if services[name].state == ssStopped:
+    if services[name].state == ssStopped and (force or not services[name].stoppedByAdmin):
       startService(name)
 
   for name in toSeq(services.keys):
@@ -131,6 +182,35 @@ proc handleExitedChild*(pid: int32, exitedOk: bool) =
       logService(name, "zakończyła działanie (pid=" & $pid & ", ok=" & $exitedOk & ")")
       svc.pid = 0
       removeCgroup(name) # bezpieczne również gdy usługa zaraz wystartuje ponownie
+
+      if svc.state == ssStopping:
+        # Zatrzymanie ZAMIERZONE: usługa była w ssStopping, bo
+        # stopService/applyTarget/zamykanie systemu WŁAŚNIE wysłało jej
+        # SIGTERM (patrz stopService niżej) -- zawsze traktujemy to jako
+        # czyste zatrzymanie, NIEZALEŻNIE od Restart= i niezależnie od
+        # tego, jak dokładnie proces się zakończył. To rozróżnienie jest
+        # konieczne, bo proces zabity SIGTERM-em kończy działanie PRZEZ
+        # SYGNAŁ, nie przez normalne exit() -- `exitedOk` (liczone z
+        # WIFEXITED) byłoby więc fałszywie ujemne, a poniższa gałąź dla
+        # rpNever zamieniłaby zamierzone zatrzymanie w stan "ssFailed".
+        # (Błąd znaleziony przez rzeczywisty test end-to-end:
+        # `zsrvctl stop USLUGA` pokazywało potem `state=failed` zamiast
+        # `state=stopped`.)
+        svc.state = ssStopped
+        # DRUGI błąd znaleziony w tym samym teście: `stopDeadline` musi
+        # zostać wyczyszczone TU, bo inaczej zostaje stara (przeszła)
+        # wartość w polu na zawsze -- `nextWakeupDeadline()` widzi ją
+        # (sprawdza tylko `stopDeadline > fromUnix(0)`, NIE sprawdza
+        # `state == ssStopping`) i liczy z niej ujemny/zerowy czas do
+        # najbliższego przebudzenia W NIESKOŃCZONOŚĆ, co zamienia
+        # `epoll_wait` w busy-loop z timeoutem 0 -- CAŁY zsrv zaczyna
+        # zżerać jeden rdzeń CPU na zawsze po PIERWSZYM kiedykolwiek
+        # zatrzymaniu jakiejkolwiek usługi (normalne zatrzymanie, bez
+        # potrzeby eskalacji do SIGKILL -- processStopEscalations czyści
+        # to pole tylko na SWOJEJ własnej ścieżce, czyli przy faktycznej
+        # eskalacji, nie przy zwykłym czystym zatrzymaniu).
+        svc.stopDeadline = fromUnix(0)
+        return
 
       case svc.def.restart
       of rpAlways:
@@ -219,6 +299,7 @@ proc stopService*(name: string) =
 
   discard kill((-svc.pid).Pid, SIGTERM) # PID ujemny = cała grupa procesów (setsid() w startService)
   svc.state = ssStopping
+  svc.stoppedByAdmin = true
   svc.stopDeadline = getTime() + initDuration(seconds = svc.def.stopSec)
   services[name] = svc
 
