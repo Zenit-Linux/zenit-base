@@ -1,3 +1,5 @@
+require "./demangle"
+
 module ElfSymbols
   record Symbol, name : String, addr : UInt64, size : UInt64
 
@@ -97,7 +99,10 @@ module ElfSymbols
   # Znajduje symbol "obejmujący" dany adres (największy adres <= addr) i
   # zwraca "nazwa" albo "nazwa+0xPRZESUNIĘCIE", jeśli adres nie trafia
   # dokładnie w początek symbolu. Zwraca nil, gdy nic nie pasuje (np.
-  # program bez tabeli symboli).
+  # program bez tabeli symboli). Nazwy w stylu Itanium C++ ABI
+  # (`_ZN...`) są demanglowane (patrz `demangle.cr`) -- nieobsługiwane
+  # konstrukcje (szablony, operatory) wracają w oryginalnej,
+  # niezdemanglowanej postaci zamiast błędu.
   def self.resolve(symbols : Array(Symbol), addr : UInt64) : String?
     best = nil.as(Symbol?)
     symbols.each do |sym|
@@ -109,7 +114,8 @@ module ElfSymbols
     end
     return nil unless best
     b = best.not_nil!
+    name = Demangle.demangle(b.name)
     offset = addr - b.addr
-    offset == 0 ? b.name : "#{b.name}+0x#{offset.to_s(16)}"
+    offset == 0 ? name : "#{name}+0x#{offset.to_s(16)}"
   end
 end
