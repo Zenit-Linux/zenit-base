@@ -1,19 +1,24 @@
 require "option_parser"
+require "./myers_diff"
 
 # ro — nowoczesna alternatywa dla `diff` (Zenit Linux, "różnice")
 #
-# STATUS: szkielet — prosty algorytm LCS (najdłuższy wspólny podciąg) do
-# wykrywania dodanych/usuniętych linii, format wyjścia zbliżony do
-# unified diff. Prawdziwy `diff -u` z kontekstem i scalaniem sąsiadujących
-# zmian w hunki pozostaje jako TODO — dziś każda różnica to osobna linia.
+# STATUS: działa. Algorytm Myersa (`myers_diff.cr`, O(D*(n+m)) zamiast
+# starej tablicy DP O(n*m) -- patrz komentarz w tym pliku) do wyznaczania
+# najkrótszego skryptu edycji, z wynikiem wypisywanym w PRAWDZIWYM
+# formacie unified diff (`diff -u`) — nagłówki hunków
+# `@@ -start,len +start,len @@`, sąsiadujące zmiany scalone w jeden
+# hunk z NUM liniami kontekstu dookoła (domyślnie 3, jak GNU diff).
 
 VERSION = "0.1.0"
 
 no_color = false
+context  = 3
 files    = [] of String
 
 parser = OptionParser.new do |p|
   p.banner = "ro — nowoczesna alternatywa dla diff (Zenit Linux)\n\nUżycie: ro [opcje] PLIK1 PLIK2"
+  p.on("-U NUM", "--unified=NUM", "liczba linii kontekstu wokół zmian (domyślnie 3)") { |v| context = v.to_i }
   p.on("--no-color", "wyłącz kolorowanie wyjścia") { no_color = true }
   p.on("-h", "--help", "pokaż tę pomoc") { puts p; exit 0 }
   p.on("--version", "pokaż wersję programu ro") { puts "ro #{VERSION}"; exit 0 }
@@ -37,49 +42,82 @@ use_color = !no_color && STDOUT.tty?
 a = File.read_lines(files[0])
 b = File.read_lines(files[1])
 
-# Tablica LCS (programowanie dynamiczne) — O(n*m) czasu i pamięci,
-# wystarczające dla plików tekstowych umiarkowanej wielkości.
-# TODO: wersja z ograniczoną pamięcią (Myers diff) dla dużych plików.
-dp = Array.new(a.size + 1) { Array.new(b.size + 1, 0) }
-(1..a.size).each do |i|
-  (1..b.size).each do |j|
-    dp[i][j] = if a[i - 1] == b[j - 1]
-                 dp[i - 1][j - 1] + 1
-               else
-                 Math.max(dp[i - 1][j], dp[i][j - 1])
-               end
+# Każdy element: (rodzaj, tekst_linii, indeks_w_a_PRZED_konsumpcją, indeks_w_b_PRZED_konsumpcją)
+# -- indeksy pozwalają później dokładnie wyliczyć numery linii w nagłówkach hunków.
+# Wyznaczone algorytmem Myersa (myers_diff.cr) zamiast poprzedniej
+# tablicy DP -- format wyniku identyczny, więc reszta programu (grupowanie
+# w hunki, wypisywanie) poniżej nie wymaga żadnych zmian.
+ops = MyersDiff.diff(a, b)
+
+if ops.all? { |(kind, _, _, _)| kind == ' ' }
+  exit 0 # pliki identyczne -- brak wyjścia, kod 0 (jak `diff`)
+end
+
+def colorize(kind : Char, text : String, use_color : Bool) : String
+  return text unless use_color
+  case kind
+  when '+' then "\e[32m#{text}\e[0m"
+  when '-' then "\e[31m#{text}\e[0m"
+  else          text
   end
 end
 
-ops = [] of {Char, String}
-i, j = a.size, b.size
-while i > 0 || j > 0
-  if i > 0 && j > 0 && a[i - 1] == b[j - 1]
-    ops << {' ', a[i - 1]}
-    i -= 1
-    j -= 1
-  elsif j > 0 && (i == 0 || dp[i][j - 1] >= dp[i - 1][j])
-    ops << {'+', b[j - 1]}
-    j -= 1
+# --- grupowanie w hunki -------------------------------------------------
+# Indeksy (w `ops`) linii ZMIENIONYCH (nie-kontekstowych).
+changed_idx = (0...ops.size).select { |k| ops[k][0] != ' ' }
+
+# Klastrowanie: dwie zmiany trafiają do TEGO SAMEGO hunku, jeśli dzieli je
+# mniej niż `2*context` linii kontekstu (bo wtedy ich strefy kontekstu i
+# tak by się nachodziły) — standardowa reguła scalania hunków z `diff -u`.
+hunks = [] of Array(Int32)
+changed_idx.each do |idx|
+  if hunks.empty? || idx.to_i32 - hunks.last.last > 2 * context
+    hunks << [idx.to_i32]
   else
-    ops << {'-', a[i - 1]}
-    i -= 1
+    hunks.last << idx.to_i32
   end
 end
-ops.reverse!
 
-changed = false
-ops.each do |(kind, line)|
-  next if kind == ' '
-  changed = true
-  colored = if !use_color
-              "#{kind}#{line}"
-            elsif kind == '+'
-              "\e[32m+#{line}\e[0m"
-            else
-              "\e[31m-#{line}\e[0m"
-            end
-  puts colored
+puts "--- #{files[0]}"
+puts "+++ #{files[1]}"
+
+hunks.each do |group|
+  start_op = Math.max(0, group.first - context)
+  end_op   = Math.min(ops.size - 1, group.last + context)
+
+  a_start = ops[start_op][2]
+  b_start = ops[start_op][3]
+  a_count = 0
+  b_count = 0
+  body = [] of String
+
+  (start_op..end_op).each do |k|
+    kind, text, _, _ = ops[k]
+    case kind
+    when ' '
+      a_count += 1
+      b_count += 1
+    when '-'
+      a_count += 1
+    when '+'
+      b_count += 1
+    end
+    body << colorize(kind, "#{kind}#{text}", use_color)
+  end
+
+  # Konwencja unified diff (GNU diffutils): gdy zakres ma DŁUGOŚĆ ZERO
+  # (czysta insercja bez usunięć po stronie A, albo czyste usunięcie bez
+  # wstawień po stronie B), numer linii w nagłówku to pozycja PRZED którą
+  # następuje zmiana, w indeksowaniu 0-bazowym -- NIE zwykłe "+1" jak przy
+  # niepustym zakresie. Bez tego rozróżnienia insercja na samym początku
+  # pliku (a_start=0, a_count=0) dawałaby błędny nagłówek "@@ -1,0 ...@@"
+  # zamiast poprawnego "@@ -0,0 ...@@", niezgodnego z tym, co generuje i
+  # czego oczekuje `patch`/GNU diff.
+  a_header_start = a_count == 0 ? a_start : a_start + 1
+  b_header_start = b_count == 0 ? b_start : b_start + 1
+  header = "@@ -#{a_header_start},#{a_count} +#{b_header_start},#{b_count} @@"
+  puts use_color ? "\e[36m#{header}\e[0m" : header
+  body.each { |l| puts l }
 end
 
-exit(changed ? 1 : 0)
+exit 1
