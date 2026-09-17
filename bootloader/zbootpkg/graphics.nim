@@ -29,8 +29,10 @@ type
     frameBufferSize*:  uint
 
   EfiGraphicsOutputProtocol = object
-    queryMode:  pointer
-    setMode:    pointer
+    queryMode*: proc(this: ptr EfiGraphicsOutputProtocol, modeNumber: uint32,
+                      sizeOfInfo: ptr uint,
+                      info: ptr ptr EfiGraphicsOutputModeInformation): EfiStatus {.cdecl.}
+    setMode*:   proc(this: ptr EfiGraphicsOutputProtocol, modeNumber: uint32): EfiStatus {.cdecl.}
     blt:        pointer
     mode*:      ptr EfiGraphicsOutputProtocolMode
 
@@ -43,6 +45,48 @@ type
     pixelsPerLine*: uint32
     bgr*:           bool # true, jeśli format pikseli to BGR zamiast RGB
 
+proc selectHighestResolutionMode(gop: ptr EfiGraphicsOutputProtocol) =
+  ## Iteruje przez WSZYSTKIE tryby zgłoszone przez GOP (0 ..< maxMode) przez
+  ## QueryMode, wybiera ten o największej liczbie pikseli (szerokość *
+  ## wysokość) i przełącza się na niego przez SetMode — zamiast akceptować
+  ## tryb ustawiony domyślnie przez firmware (często niska rozdzielczość
+  ## "bezpieczna" dla ekranów tekstowych/awaryjnych).
+  ##
+  ## Best-effort: jeśli QueryMode/SetMode zawiodą dla wszystkich trybów
+  ## (albo gop.mode.maxMode == 0), po prostu zostajemy przy trybie
+  ## bieżącym — brak framebufferu w wysokiej rozdzielczości nie jest
+  ## powodem do panic(), jądro i tak dostaje FramebufferInfo z tego, co
+  ## faktycznie jest aktywne w momencie odczytu.
+  if gop.queryMode == nil or gop.setMode == nil or gop.mode == nil:
+    return
+
+  let maxMode = gop.mode.maxMode
+  if maxMode == 0:
+    return
+
+  var bestMode: uint32 = gop.mode.mode
+  var bestPixels: uint64 = 0
+  if gop.mode.info != nil:
+    bestPixels = uint64(gop.mode.info.horizontalResolution) *
+                 uint64(gop.mode.info.verticalResolution)
+
+  for modeNumber in 0'u32 ..< maxMode:
+    var infoSize: uint = 0
+    var info: ptr EfiGraphicsOutputModeInformation = nil
+    let status = gop.queryMode(gop, modeNumber, addr infoSize, addr info)
+    if status != StatusSuccess or info == nil:
+      continue
+
+    let pixels = uint64(info.horizontalResolution) * uint64(info.verticalResolution)
+    if pixels > bestPixels:
+      bestPixels = pixels
+      bestMode = modeNumber
+
+  if bestMode != gop.mode.mode:
+    let status = gop.setMode(gop, bestMode)
+    if status != StatusSuccess:
+      efiPrint("[zboot] SetMode() na tryb o najwyzszej rozdzielczosci nie powiodlo sie — zostaje biezacy tryb\n")
+
 proc getFramebufferInfo*(bs: ptr EfiBootServices): FramebufferInfo =
   result = FramebufferInfo(present: false)
 
@@ -52,6 +96,8 @@ proc getFramebufferInfo*(bs: ptr EfiBootServices): FramebufferInfo =
   if status != StatusSuccess or gop == nil:
     efiPrint("[zboot] GOP niedostepny — jadro bedzie musialo uzyc trybu tekstowego\n")
     return
+
+  selectHighestResolutionMode(gop)
 
   let mode = gop.mode
   if mode == nil or mode.info == nil:
@@ -68,10 +114,9 @@ proc getFramebufferInfo*(bs: ptr EfiBootServices): FramebufferInfo =
     bgr: mode.info.pixelFormat == 1'u32,
   )
 
-  efiPrint("[zboot] framebuffer: " & $result.width & "x" & $result.height &
-            " @ 0x")
+  efiPrint("[zboot] framebuffer: ")
+  efiPrintUInt(uint64(result.width))
+  efiPrint("x")
+  efiPrintUInt(uint64(result.height))
+  efiPrint(" @ ")
   efiPrintHex("baza", result.base)
-
-  # TODO: iteracja po dostępnych trybach (QueryMode dla i in 0..<maxMode) i
-  # wybór najwyższej rozdzielczości przez SetMode zamiast akceptowania
-  # trybu ustawionego domyślnie przez firmware.
