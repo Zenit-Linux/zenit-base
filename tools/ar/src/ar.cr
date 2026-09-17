@@ -4,15 +4,17 @@ require "./ustar"
 
 # ar — nowoczesna alternatywa dla `tar` (Zenit Linux, "archiwizuj")
 #
-# STATUS: szkielet+ — używa prawdziwego formatu POSIX ustar (ustar.cr),
-# więc archiwa utworzone przez `ar -c` da się rozpakować zwykłym `tar -xf`
-# (GNU tar / bsdtar) i na odwrót, `ar -x` potrafi rozpakować archiwa
-# utworzone przez prawdziwy tar (o ile nie używają rozszerzenia GNU
-# @LongLink dla bardzo długich ścieżek — patrz TODO w ustar.cr). Obsługuje
+# STATUS: używa prawdziwego formatu POSIX ustar (ustar.cr), więc archiwa
+# utworzone przez `ar -c` da się rozpakować zwykłym `tar -xf` (GNU tar /
+# bsdtar) i na odwrót. Ścieżki dłuższe niż mieści klasyczny ustar (>256 B
+# łącznie prefix+name) są obsługiwane przez rozszerzenie GNU @LongLink
+# (ten sam mechanizm co prawdziwy GNU tar — blok typu 'L' niosący pełną
+# ścieżkę przed właściwym nagłówkiem), więc archiwa z bardzo długimi
+# ścieżkami są w pełni wymienne z GNU tar/bsdtar w OBIE strony. Obsługuje
 # też `-z` (gzip, jak `tar czf`/`tar xzf`) przez wbudowany moduł
 # `compress/gzip` z biblioteki standardowej Crystala. Zachowanie
-# uprawnień/właściciela poza samym trybem pliku, linki symboliczne i
-# rozszerzenie GNU dla długich nazw pozostają jako TODO.
+# uprawnień/właściciela poza samym trybem pliku i linki symboliczne
+# pozostają jako TODO.
 
 VERSION = "0.1.0"
 
@@ -76,7 +78,7 @@ def write_entries(io : IO, inputs : Array(String), verbose : Bool)
 
       content = File.read(full_path)
       mode = File.info(full_path).permissions.value.to_i32
-      header = Ustar.build_header(stored_name, content.bytesize.to_u64, mode, Ustar::TYPE_REGULAR)
+      header = Ustar.build_entry_headers(stored_name, content.bytesize.to_u64, mode, Ustar::TYPE_REGULAR)
 
       io.write(header)
       io.write(content.to_slice)
@@ -92,6 +94,8 @@ def write_entries(io : IO, inputs : Array(String), verbose : Bool)
 end
 
 def each_entry(io : IO)
+  pending_long_name = nil.as(String?)
+
   loop do
     block = Bytes.new(Ustar::BLOCK_SIZE)
     read = io.read_fully?(block)
@@ -105,7 +109,19 @@ def each_entry(io : IO)
     io.read_fully(raw)
     content = raw[0, header.size.to_i32]
 
-    yield header, content
+    if header.typeflag == Ustar::TYPE_GNU_LONGLINK
+      # Ten blok NIE jest prawdziwym wpisem — jego "zawartość" to pełna
+      # ścieżka (zakończona NUL) dla NASTĘPNEGO nagłówka, który przyjdzie
+      # zaraz po nim (patrz Ustar.build_entry_headers po stronie zapisu).
+      nul_idx = content.index(0_u8) || content.size
+      pending_long_name = String.new(content[0, nul_idx])
+      next
+    end
+
+    real_name = pending_long_name || header.name
+    pending_long_name = nil
+
+    yield Ustar::ParsedHeader.new(real_name, header.size, header.mode, header.typeflag), content
   end
 end
 
