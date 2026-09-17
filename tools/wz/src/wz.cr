@@ -2,13 +2,15 @@ require "option_parser"
 
 # wz — nowoczesna alternatywa dla `ln` (Zenit Linux, "wiąż")
 #
-# STATUS: szkielet+ — linki symboliczne i twarde działają w podstawowym
-# zakresie, wraz z obsługą wielu dowiązań na raz do jednego katalogu
-# docelowego (-t DIR, jak `ln -t`, oraz forma `wz CEL... KATALOG` gdy
-# ostatni argument jest istniejącym katalogiem). Walidacja skrzyżowanych
-# systemów plików (co ma znaczenie tylko dla dowiązań twardych) pozostaje
-# jako TODO — dziś polegamy na tym, że `File.link` sam zwróci błąd
-# systemowy (EXDEV), jeśli cel i dowiązanie leżą na różnych urządzeniach.
+# STATUS: linki symboliczne i twarde działają w podstawowym zakresie,
+# wraz z obsługą wielu dowiązań na raz do jednego katalogu docelowego
+# (-t DIR, jak `ln -t`, oraz forma `wz CEL... KATALOG` gdy ostatni
+# argument jest istniejącym katalogiem). Dowiązania twarde między różnymi
+# systemami plików są NIEMOŻLIWE z definicji (twarde dowiązanie to druga
+# nazwa dla TEGO SAMEGO inode, a inode nie ma sensu poza swoim systemem
+# plików) — zamiast duplikować logikę wykrywania tego przez porównanie
+# urządzeń (stat.st_dev) PRZED próbą, pozwalamy jądru samemu to wykryć
+# (zwraca EXDEV) i tłumaczymy ten konkretny błąd na czytelny komunikat.
 
 VERSION = "0.1.0"
 
@@ -49,6 +51,15 @@ def make_link(target : String, link : String, symbolic : Bool, force : Bool, ver
     end
     puts "wz: #{symbolic ? "symboliczne" : "twarde"} '#{link}' -> '#{target}'" if verbose
     true
+  rescue e : File::Error
+    if e.os_error == Errno::EXDEV
+      STDERR.puts "wz: nie można utworzyć twardego dowiązania '#{link}' -> '#{target}': " \
+                  "leżą na RÓŻNYCH systemach plików (twarde dowiązanie wymaga tego samego " \
+                  "urządzenia — użyj -s dla dowiązania symbolicznego zamiast tego)"
+    else
+      STDERR.puts "wz: nie można utworzyć dowiązania '#{link}' -> '#{target}': #{e.message}"
+    end
+    false
   rescue e
     STDERR.puts "wz: nie można utworzyć dowiązania '#{link}' -> '#{target}': #{e.message}"
     false
