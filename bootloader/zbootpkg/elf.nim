@@ -6,6 +6,14 @@ const
   Elfclass64 = 2'u8
   PtLoad     = 1'u32
 
+  MaxLoadSegments* = 16
+    ## Realne jądra ELF64 mają zwykle 3-6 segmentów PT_LOAD (.text,
+    ## .rodata, .data, .bss, czasem więcej) — 16 to spory zapas. Stały
+    ## rozmiar zamiast `seq[LoadSegment]` (dawniej `.add()`-owany
+    ## dynamicznie) celowo — patrz obszerna notatka przy
+    ## `zbootpkg/filesystem.asciiToUtf16Path` o tym, czemu unikamy
+    ## alokacji `seq`/`string` w tym freestanding środowisku UEFI.
+
   # Wartości p_flags z nagłówka programu (ELF), używane do ustawienia
   # właściwych uprawnień strony (R/W/X) w zbootpkg/paging.
   PfExecute* = 1'u32
@@ -53,12 +61,13 @@ type
     flags*:      uint32 # p_flags z nagłówka programu: PF_X=1, PF_W=2, PF_R=4
 
   ParsedKernel* = object
-    valid*:      bool
-    entryPoint*: uint64
-    segments*:   seq[LoadSegment]
+    valid*:        bool
+    entryPoint*:   uint64
+    segments*:     array[MaxLoadSegments, LoadSegment]
+    segmentCount*: int
 
 proc parseElfKernel*(buffer: pointer, bufferLen: uint): ParsedKernel =
-  result = ParsedKernel(valid: false, entryPoint: 0, segments: @[])
+  result = ParsedKernel(valid: false, entryPoint: 0, segmentCount: 0)
 
   if bufferLen < sizeof(Elf64Ehdr).uint:
     efiPrint("[zboot] obraz jadra za maly, aby zawierac naglowek ELF64\n")
@@ -81,15 +90,19 @@ proc parseElfKernel*(buffer: pointer, bufferLen: uint): ParsedKernel =
   for i in 0 ..< int(ehdr.phnum):
     let phdr = cast[ptr Elf64Phdr](phTable + uint(i) * ehdr.phentsize.uint)
     if phdr.kind == PtLoad:
-      result.segments.add(LoadSegment(
-        fileOffset: phdr.offset,
-        virtualAddr: phdr.vaddr,
-        fileSize: phdr.filesz,
-        memSize: phdr.memsz,
-        flags: phdr.flags,
-      ))
+      if result.segmentCount < MaxLoadSegments:
+        result.segments[result.segmentCount] = LoadSegment(
+          fileOffset: phdr.offset,
+          virtualAddr: phdr.vaddr,
+          fileSize: phdr.filesz,
+          memSize: phdr.memsz,
+          flags: phdr.flags,
+        )
+        inc result.segmentCount
+      else:
+        efiPrint("[zboot] ostrzezenie: za duzo segmentow PT_LOAD, pomijam nadmiarowe\n")
 
-  if result.segments.len == 0:
+  if result.segmentCount == 0:
     efiPrint("[zboot] ostrzezenie: brak segmentow PT_LOAD w obrazie jadra\n")
 
   result.valid = true
@@ -101,12 +114,13 @@ proc computeSpan*(parsed: ParsedKernel): tuple[lowestVaddr: uint64, spanBytes: u
   ## region fizyczny i zbudować dla niego tablice stron — działa zarówno
   ## dla jąder linkowanych nisko (np. 0x100000), jak i higher-half
   ## (np. 0xFFFFFFFF80000000).
-  if parsed.segments.len == 0:
+  if parsed.segmentCount == 0:
     return (0'u64, 0'u64)
 
   var lowest = uint64.high
   var highest = 0'u64
-  for seg in parsed.segments:
+  for i in 0 ..< parsed.segmentCount:
+    let seg = parsed.segments[i]
     if seg.virtualAddr < lowest:
       lowest = seg.virtualAddr
     let segEnd = seg.virtualAddr + seg.memSize
@@ -125,7 +139,10 @@ proc allocKernelPhysicalRegion*(bs: ptr EfiBootServices, spanBytes: uint64): uin
   # AllocateAnyPages = 0, EfiLoaderData = 2
   let status = bs.allocatePages(0'u32, EfiMemoryType(2), pages.uint, addr address)
   if status != StatusSuccess:
-    panic("nie udalo sie zaalokowac fizycznego regionu na jadro (" & $spanBytes & " bajtow)")
+    efiPrint("[zboot] BLAD: nie udalo sie zaalokowac fizycznego regionu na jadro (")
+    efiPrintUInt(spanBytes)
+    efiPrint(" bajtow)\n")
+    panic("nie udalo sie zaalokowac fizycznego regionu na jadro")
   address
 
 proc copySegmentsToPhysical*(kernelBuffer: pointer, parsed: ParsedKernel,
@@ -137,17 +154,18 @@ proc copySegmentsToPhysical*(kernelBuffer: pointer, parsed: ParsedKernel,
   ## oryginalne adresy wirtualne są niskie czy higher-half. Odwzorowanie
   ## adresu wirtualnego z powrotem na ten adres fizyczny jest zadaniem
   ## tablic stron budowanych w zbootpkg/paging.nim.
-  for seg in parsed.segments:
+  for i in 0 ..< parsed.segmentCount:
+    let seg = parsed.segments[i]
     let src = cast[uint](kernelBuffer) + seg.fileOffset
     let destPhys = physBase + (seg.virtualAddr - lowestVaddr)
     let dst = cast[ptr UncheckedArray[uint8]](destPhys)
     let srcArr = cast[ptr UncheckedArray[uint8]](src)
 
-    for i in 0 ..< int(seg.fileSize):
-      dst[i] = srcArr[i]
+    for k in 0 ..< int(seg.fileSize):
+      dst[k] = srcArr[k]
 
-    for i in int(seg.fileSize) ..< int(seg.memSize):
-      dst[i] = 0'u8
+    for k in int(seg.fileSize) ..< int(seg.memSize):
+      dst[k] = 0'u8
 
 proc copySegmentsToMemory*(kernelBuffer: pointer, parsed: ParsedKernel) =
   ## WARIANT UPROSZCZONY (zachowany dla zgodności): kopiuje segmenty
@@ -156,14 +174,15 @@ proc copySegmentsToMemory*(kernelBuffer: pointer, parsed: ParsedKernel) =
   ## pamięci. Główna ścieżka w zboot.nim używa teraz
   ## `copySegmentsToPhysical` + `zbootpkg/paging` zamiast tej procedury,
   ## właśnie po to, by obsłużyć również jądra higher-half.
-  for seg in parsed.segments:
+  for i in 0 ..< parsed.segmentCount:
+    let seg = parsed.segments[i]
     let src = cast[uint](kernelBuffer) + seg.fileOffset
     let dst = cast[ptr UncheckedArray[uint8]](seg.virtualAddr)
     let srcArr = cast[ptr UncheckedArray[uint8]](src)
 
-    for i in 0 ..< int(seg.fileSize):
-      dst[i] = srcArr[i]
+    for k in 0 ..< int(seg.fileSize):
+      dst[k] = srcArr[k]
 
     # Zerowanie .bss (część segmentu, która jest w pamięci, ale nie w pliku).
-    for i in int(seg.fileSize) ..< int(seg.memSize):
-      dst[i] = 0'u8
+    for k in int(seg.fileSize) ..< int(seg.memSize):
+      dst[k] = 0'u8
