@@ -22,11 +22,12 @@ private def tool_path(name : String) : String
   File.join(BIN_DIR, name)
 end
 
-private def run_tool(name : String, args : Array(String) = [] of String, chdir : String? = nil)
+private def run_tool(name : String, args : Array(String) = [] of String, chdir : String? = nil, input : String? = nil)
   path = tool_path(name)
   output = IO::Memory.new
   error = IO::Memory.new
-  status = Process.run(path, args: args, output: output, error: error, chdir: chdir)
+  stdin = input ? IO::Memory.new(input) : Process::Redirect::Close
+  status = Process.run(path, args: args, output: output, error: error, chdir: chdir, input: stdin)
   {status: status, stdout: output.to_s, stderr: error.to_s}
 end
 
@@ -163,6 +164,68 @@ describe "lb (wc)" do
       result = run_tool("lb", [f])
       result[:status].success?.should be_true
       result[:stdout].should contain(f)
+    end
+  end
+end
+
+describe "ro (diff)" do
+  it "zwraca kod 0 i brak wyjścia dla identycznych plików" do
+    with_tmp_dir do |dir|
+      a = File.join(dir, "a.txt")
+      b = File.join(dir, "b.txt")
+      File.write(a, "x\ny\nz\n")
+      File.write(b, "x\ny\nz\n")
+      result = run_tool("ro", [a, b])
+      result[:status].success?.should be_true
+      result[:stdout].should eq("")
+    end
+  end
+
+  it "wypisuje unified diff z nagłówkami --- i +++ oraz kodem 1" do
+    with_tmp_dir do |dir|
+      a = File.join(dir, "a.txt")
+      b = File.join(dir, "b.txt")
+      File.write(a, "a\nb\nc\n")
+      File.write(b, "a\nx\nc\n")
+      result = run_tool("ro", [a, b])
+      result[:status].success?.should be_false
+      result[:stdout].should contain("--- #{a}")
+      result[:stdout].should contain("+++ #{b}")
+      result[:stdout].should contain("-b")
+      result[:stdout].should contain("+x")
+    end
+  end
+
+  it "poprawnie obsluguje wstawienie do pustego pliku (naglowek @@ -0,0 ...)" do
+    with_tmp_dir do |dir|
+      a = File.join(dir, "empty.txt")
+      b = File.join(dir, "new.txt")
+      File.write(a, "")
+      File.write(b, "linia1\nlinia2\n")
+      result = run_tool("ro", [a, b])
+      result[:stdout].should contain("@@ -0,0 +1,2 @@")
+    end
+  end
+
+  it "generuje łatę, którą `patch` poprawnie odtwarza z A do B" do
+    with_tmp_dir do |dir|
+      a = File.join(dir, "a.txt")
+      b = File.join(dir, "b.txt")
+      File.write(a, (1..30).map { |i| "linia#{i}" }.join("\n") + "\n")
+      lines_b = (1..30).map { |i| "linia#{i}" }.to_a
+      lines_b[5] = "ZMIENIONA"
+      lines_b.delete_at(20)
+      lines_b.insert(10, "NOWA")
+      File.write(b, lines_b.join("\n") + "\n")
+
+      diff_result = run_tool("ro", [a, b])
+      work = File.join(dir, "work.txt")
+      File.write(work, File.read(a))
+
+      patch_result = Process.run("patch", args: ["--quiet", work],
+        input: IO::Memory.new(diff_result[:stdout]))
+      patch_result.success?.should be_true
+      File.read(work).should eq(File.read(b))
     end
   end
 end
@@ -363,5 +426,50 @@ describe "wp (cat) -A" do
       result = run_tool("wp", ["-A", f])
       result[:stdout].should eq("a^Ib$\n")
     end
+  end
+end
+
+describe "xa (xargs)" do
+  it "buduje i uruchamia polecenie z argumentami ze stdin" do
+    result = run_tool("xa", ["echo"], input: "a\nb\nc\n")
+    result[:stdout].should eq("a b c\n")
+  end
+
+  it "-n grupuje argumenty po N na wywołanie" do
+    result = run_tool("xa", ["-n", "2", "echo"], input: "a\nb\nc\nd\ne\n")
+    result[:stdout].should eq("a b\nc d\ne\n")
+  end
+
+  it "-I podmienia zastępnik, jedno wywołanie na wiersz" do
+    result = run_tool("xa", ["-I", "{}", "echo", "x={}"], input: "1\n2\n")
+    result[:stdout].should eq("x=1\nx=2\n")
+  end
+
+  it "-0 rozdziela argumenty bajtem NUL" do
+    result = run_tool("xa", ["-0", "echo"], input: "a\0b\0c\0")
+    result[:stdout].should eq("a b c\n")
+  end
+
+  it "przekazuje FLAGI polecenia docelowego bez ich przechwytywania (regresja)" do
+    # `-n` jest też flagą xa -- to sprawdza, że po nazwie polecenia
+    # (`echo`) flagi trafiają do `echo`, a nie są parsowane przez `xa`.
+    result = run_tool("xa", ["echo", "-n"], input: "test\n")
+    result[:stdout].should eq("test") # brak końcowej nowej linii = -n dotarło do echo
+  end
+
+  it "-P uruchamia wywołania równolegle i zwraca niezerowy kod przy błędzie" do
+    result = run_tool("xa", ["-P", "4", "-I", "{}", "sh", "-c", "exit {}"], input: "0\n1\n0\n")
+    result[:status].success?.should be_false
+  end
+
+  it "-- oddziela opcje xa od polecenia zaczynającego się od '-'" do
+    result = run_tool("xa", ["--", "echo", "-n", "foo"], input: "a\n")
+    result[:stdout].should eq("foo a")
+  end
+
+  it "zwraca błąd, gdy nie podano polecenia" do
+    result = run_tool("xa", [] of String, input: "a\n")
+    result[:status].success?.should be_false
+    result[:stderr].should contain("brak polecenia")
   end
 end
