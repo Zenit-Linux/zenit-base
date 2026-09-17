@@ -1,7 +1,7 @@
 import std/[os, posix]
 import zsrvpkg/[state, logger, parser, target, eventloop, cgroups]
 
-const Version = "0.1.0"
+const Version = "0.2.0"
 
 when isMainModule:
   if paramCount() >= 1 and paramStr(1) in ["-v", "--version"]:
