@@ -90,6 +90,18 @@
     :apk (run ;(maybe-sudo "apk" "add" "mingw-w64-gcc"))
     (eprint "[Zenit] Nieznany menedżer pakietów -- pomiń automatyczną instalację.")))
 
+(defn install-nasm-for
+  [pkg-manager]
+  (case pkg-manager
+    :apt (do
+           (run-allow-fail ;(maybe-sudo "apt-get" "update"))
+           (run ;(maybe-sudo "apt-get" "install" "-y" "nasm")))
+    :dnf (run ;(maybe-sudo "dnf" "install" "-y" "nasm"))
+    :pacman (run ;(maybe-sudo "pacman" "-S" "--noconfirm" "nasm"))
+    :zypper (run ;(maybe-sudo "zypper" "install" "-y" "nasm"))
+    :apk (run ;(maybe-sudo "apk" "add" "nasm"))
+    (eprint "[Zenit] Nieznany menedżer pakietów -- pomiń automatyczną instalację.")))
+
 (defn ensure-mingw
   "Sprawdza, czy `x86_64-w64-mingw32-gcc` (krzyżowy kompilator wymagany
    przez `nimble buildBootloader` -- zboot celuje w UEFI/PE32+, patrz
@@ -132,6 +144,34 @@
           (eprint "[Zenit] Kontynuuję bez niego -- reszta budowy przebiegnie normalnie, "
                   "tylko bootloader zostanie pominięty."))))))
 
+(defn ensure-nasm
+  "Analogiczne do `ensure-mingw`, ale dla NASM -- wymaganego przez
+   `nimble buildBootloaderBios` (backend BIOS bootloadera zboot,
+   bootloader/bios/*.asm). Tak samo celowo nie przerywa budowy w razie
+   niepowodzenia instalacji."
+  []
+  (if (command-exists? "nasm")
+    (print "==> [Zenit] nasm już dostępny -- pomijam instalację")
+    (do
+      (print "\n[Zenit] nasm nie znaleziony w PATH -- wymagany do budowy backendu BIOS bootloadera.")
+      (def pm (detect-package-manager))
+      (if pm
+        (do
+          (print "[Zenit] Wykryto menedżer pakietów: " pm " -- instaluję nasm...")
+          (try
+            (install-nasm-for pm)
+            ([err]
+              (eprint "[Zenit] Automatyczna instalacja nasm nie powiodła się: " err)
+              (eprint "[Zenit] Zainstaluj ręcznie (np. `apt install nasm`) i uruchom ponownie -- "
+                      "reszta budowy przebiegnie normalnie, tylko backend BIOS zostanie pominięty.")))
+          (unless (command-exists? "nasm")
+            (eprint "[Zenit] nasm nadal niedostępny po próbie instalacji -- "
+                    "`nimble buildBootloaderBios` prawdopodobnie zawiedzie (i zostanie to tylko zalogowane, nie przerwie budowy).")))
+        (do
+          (eprint "[Zenit] Nie rozpoznano menedżera pakietów tej dystrybucji -- zainstaluj nasm ręcznie.")
+          (eprint "[Zenit] Kontynuuję bez niego -- reszta budowy przebiegnie normalnie, "
+                  "tylko backend BIOS zostanie pominięty."))))))
+
 (defn build-nim-shell
   []
   (print "\n[Zenit] Budowanie powłoki Nim: " (string/join nim-tools ", "))
@@ -153,7 +193,15 @@
   (try
     (run "nimble" "buildBootloader")
     ([err]
-      (eprint "[Zenit] Bootloader nie zbudował się: " err))))
+      (eprint "[Zenit] Bootloader nie zbudował się: " err)))
+  # Backend BIOS (bootloader/bios/*.asm, osobna binarka MBR/VBR -- patrz
+  # notatka w zbootpkg/backend.nim) -- ta sama zasada "nie przerywaj
+  # budowy": brak nasm/błąd asemblacji jest tylko logowany.
+  (ensure-nasm)
+  (try
+    (run "nimble" "buildBootloaderBios")
+    ([err]
+      (eprint "[Zenit] Backend BIOS bootloadera nie zbudował się: " err))))
 
 (defn build-crystal
   []
@@ -178,6 +226,8 @@
     (copy-if-exists (string t "/" t) (string "dist/" t)))
   (copy-if-exists "init-system/zsrv" "dist/zsrv")
   (copy-if-exists "bootloader/BOOTX64.EFI" "dist/BOOTX64.EFI")
+  (copy-if-exists "bootloader/bios/stage1.bin" "dist/zboot-bios-stage1.bin")
+  (copy-if-exists "bootloader/bios/stage2.bin" "dist/zboot-bios-stage2.bin")
   (each t crystal-tools
     (copy-if-exists (string "bin/" t) (string "dist/" t))))
 
