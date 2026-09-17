@@ -1,4 +1,4 @@
-version       = "0.1.0"
+version       = "0.2.0"
 author        = "Zenit Linux Developers"
 description   = "Rdzenne komponenty Zenit Linux napisane w Nim: powłoka zesh, bootloader zboot i system init zsrv (każdy rozbity na moduły w katalogach *pkg/)"
 license       = "Apache-2.0"
@@ -6,7 +6,9 @@ license       = "Apache-2.0"
 # Jedyny komponent budowany jako zwykły, natywny binarny plik przez `nimble build`.
 # zboot (bootloader, --os:any + własny alokator, patrz zbootpkg/allocator.nim)
 # i zsrv (init/PID 1) mają własne zadania poniżej, ponieważ wymagają
-# nietypowych flag kompilacji.
+# nietypowych flag kompilacji. Backend BIOS bootloadera zboot (osobna
+# binarka MBR/VBR, patrz bootloader/bios/) jest napisany w NASM, nie w Nim
+# -- ma własny task `buildBootloaderBios` poniżej.
 bin           = @["zesh/zesh"]
 srcDir        = "."
 
@@ -19,8 +21,9 @@ task buildInit, "Buduje system init zsrv (PID 1) w trybie release":
   exec "nim c -d:release --out:init-system/zsrv init-system/zsrv.nim"
 
 task buildBootloader, "Buduje bootloader zboot jako aplikację UEFI (BOOTX64.EFI)":
-  # zboot celuje wyłącznie w UEFI x86_64 na tym etapie (wsparcie BIOS
-  # planowane jest jako osobny plugin, patrz komentarz w bootloader/zboot.nim).
+  # zboot na UEFI (ta binarka) i zboot na BIOS (bootloader/bios/, task
+  # buildBootloaderBios poniżej) to dwie CAŁKOWICIE oddzielne binarki --
+  # patrz notatka architektoniczna w bootloader/zbootpkg/backend.nim.
   #
   # UEFI wymaga obrazu PE32+ z subsystemem EFI_APPLICATION (10) i konwencji
   # wywołań MS x64 ABI, dlatego krzyżowo kompilujemy przez mingw-w64 zamiast
@@ -63,6 +66,25 @@ task buildBootloader, "Buduje bootloader zboot jako aplikację UEFI (BOOTX64.EFI
        "--passL:\"-nostdlib -Wl,--subsystem,10 -Wl,-e,efi_main\" " &
        "--out:bootloader/BOOTX64.EFI bootloader/zboot.nim"
 
+task buildBootloaderBios, "Buduje backend BIOS bootloadera zboot (MBR + stage2, NASM)":
+  # W przeciwieństwie do reszty projektu ten backend NIE jest napisany w
+  # Nimie -- BIOS startuje w 16-bitowym trybie rzeczywistym, do którego Nim
+  # (jak każdy kompilator kodu wysokiego poziomu celujący we współczesne
+  # ABI) nie potrafi kompilować. Kod przechodzi ręcznie real mode ->
+  # protected mode -> long mode w NASM, dopiero wtedy jest "zwykłym" x86-64
+  # -- patrz obszerne komentarze na górze bootloader/bios/stage1.asm i
+  # bootloader/bios/stage2.asm.
+  #
+  # Wymaga zainstalowanego NASM (patrz build.janet::ensure-nasm i
+  # .github/workflows/build-bootloader-bios.yml). Wynikiem są dwa surowe
+  # pliki binarne (nie ELF/PE) -- stage1.bin (dokładnie 512 B, sektor MBR)
+  # i stage2.bin -- gotowe do wklejenia na dysk przez
+  # scripts/make-bios-image.py razem z surowym plikiem ELF64 jądra.
+  exec "nasm -f bin -o bootloader/bios/stage1.bin bootloader/bios/stage1.asm"
+  exec "nasm -f bin -o bootloader/bios/stage2.bin bootloader/bios/stage2.asm"
+  echo "zboot-bios: stage1.bin + stage2.bin zbudowane w bootloader/bios/"
+  echo "Aby zlozyc testowy obraz dysku QEMU, uzyj scripts/make-bios-image.py (patrz bootloader/bios/test/README.md)."
+
 task buildAll, "Buduje wszystkie komponenty Nim (zesh, zsrv, zboot)":
   exec "nimble buildShell"
   exec "nimble buildInit"
@@ -76,6 +98,8 @@ task test, "Uruchamia testy jednostkowe komponentów Nim (patrz tests/)":
   exec "nim c -r tests/test_service_parser.nim"
   exec "nim c -r tests/test_lexer.nim"
   exec "nim c -r tests/test_parser.nim"
+  exec "nim c -r tests/test_cmdhistory.nim"
+  exec "nim c -r tests/test_vars.nim"
   echo "\nWszystkie testy Nim przeszły pomyślnie."
 
 task install, "Instaluje zbudowane binaria do systemu (PREFIX=/usr/local domyślnie)":
