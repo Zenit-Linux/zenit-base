@@ -124,13 +124,14 @@ proc mapRegion4K(bs: ptr EfiBootServices, pml4Phys: uint64, virtStart: uint64,
     phys += PageSize4K
 
 proc mapKernelSegments(bs: ptr EfiBootServices, pml4Phys: uint64,
-                        segments: seq[LoadSegment], kernelVirtBase: uint64,
-                        kernelPhysBase: uint64) =
+                        segments: array[MaxLoadSegments, LoadSegment], segmentCount: int,
+                        kernelVirtBase: uint64, kernelPhysBase: uint64) =
   ## Mapuje KAŻDY segment PT_LOAD osobno, stronami 4 KiB, z uprawnieniami
   ## wynikającymi z jego własnych p_flags — np. sekcja .text dostaje
   ## R+X (bez W), .data dostaje R+W (bez X), zamiast jednego mapowania
   ## R+W+X dla całego obszaru jądra.
-  for seg in segments:
+  for i in 0 ..< segmentCount:
+    let seg = segments[i]
     let segVirt = seg.virtualAddr
     let segPhys = kernelPhysBase + (seg.virtualAddr - kernelVirtBase)
     # Zaokrąglenie w górę do granicy strony 4 KiB, żeby objąć całe memSize
@@ -141,25 +142,82 @@ proc mapKernelSegments(bs: ptr EfiBootServices, pml4Phys: uint64,
 
 proc buildPageTables*(bs: ptr EfiBootServices, identityMapGiB: uint64,
                        kernelVirtBase: uint64, kernelPhysBase: uint64,
-                       segments: seq[LoadSegment]): PageTables =
+                       segments: array[MaxLoadSegments, LoadSegment], segmentCount: int): PageTables =
   ## Buduje kompletny zestaw tablic stron obejmujący:
   ##   1) identity mapping niskiej pamięci (0 .. identityMapGiB GiB),
   ##      stronami 2 MiB — dla buforów zboot (mapa pamięci, BootInfo, stos),
   ##   2) mapowanie KAŻDEGO segmentu PT_LOAD jądra osobno, stronami 4 KiB,
   ##      z uprawnieniami R/W/X odpowiadającymi jego p_flags.
   ##
-  ## TODO: `identityMapGiB` jest dziś stałą przekazywaną z zboot.nim
-  ## (4 GiB); docelowo powinno to być wyliczone z najwyższego adresu
-  ## fizycznego w mapie pamięci (zbootpkg/memory), żeby nie zakładać
-  ## sztywnego rozmiaru RAM-u.
+  ## `identityMapGiB` jest wyliczane przez wywołującego (zboot.nim) na
+  ## podstawie `zbootpkg/memory.maxPhysicalAddress()` — najwyższego adresu
+  ## fizycznego zgłoszonego w mapie pamięci UEFI — zamiast zakładać sztywny
+  ## rozmiar RAM-u. Patrz `computeIdentityMapGiB` w zboot.nim.
   enableNoExecute()
 
   let pml4Phys = allocPageAligned(bs, 1)
 
   mapRegion2M(bs, pml4Phys, 0'u64, 0'u64, identityMapGiB * 1024'u64 * 1024'u64 * 1024'u64)
-  mapKernelSegments(bs, pml4Phys, segments, kernelVirtBase, kernelPhysBase)
+  mapKernelSegments(bs, pml4Phys, segments, segmentCount, kernelVirtBase, kernelPhysBase)
 
   PageTables(pml4Phys: pml4Phys)
+
+proc punchGuardPage*(bs: ptr EfiBootServices, pml4Phys: uint64, physAddr: uint64) =
+  ## Oznacza JEDNĄ stronę 4 KiB pod adresem `physAddr` jako nieobecną
+  ## (not present) w tablicach stron zbudowanych przez `buildPageTables`
+  ## — używane do stworzenia strony strażniczej (guard page) POD stosem
+  ## jądra przekazywanym do `zbootpkg/handoff.jumpToKernel` (patrz
+  ## `handoff.allocKernelStack`), żeby przepełnienie stosu podczas
+  ## wczesnego rozruchu jądra powodowało natychmiastowy #PF zamiast
+  ## cichej korupcji sąsiedniej pamięci.
+  ##
+  ## `physAddr` MUSI leżeć w obszarze objętym identity-mappingiem
+  ## (`mapRegion2M`, stronami 2 MiB) zbudowanym przez `buildPageTables` —
+  ## w przeciwnym razie ta funkcja jest no-opem (zwraca, gdy natrafi na
+  ## brakujący wpis na dowolnym poziomie).
+  ##
+  ## MUSI być wywołane PRZED `ExitBootServices()` — potrzebuje `bs` do
+  ## zaalokowania nowej tablicy PT przy "democji" strony 2 MiB (patrz niżej).
+  let virt = physAddr # identity mapping w tym zakresie: virt == phys
+
+  let pml4e = entriesOf(pml4Phys)
+  let i4 = pml4Index(virt)
+  if (pml4e[i4] and PtPresent) == 0:
+    return
+  let pdptPhys = pml4e[i4] and 0xFFFFFFFFFFFFF000'u64
+
+  let pdpte = entriesOf(pdptPhys)
+  let i3 = pdptIndex(virt)
+  if (pdpte[i3] and PtPresent) == 0:
+    return
+  let pdPhys = pdpte[i3] and 0xFFFFFFFFFFFFF000'u64
+
+  let pde = entriesOf(pdPhys)
+  let i2 = pdIndex(virt)
+  if (pde[i2] and PtPresent) == 0:
+    return
+
+  if (pde[i2] and PtHuge) != 0:
+    # Strona 2 MiB z gruboziarnistego identity-mappingu (mapRegion2M) --
+    # nie da się w niej "wybić" pojedynczej strony 4 KiB bezpośrednio
+    # (bit PS obejmuje całe 2 MiB naraz), więc trzeba ją najpierw
+    # "zdemować": zamienić na tablicę PT z 512 osobnymi wpisami 4 KiB,
+    # zachowującymi te same uprawnienia (R+W, tak jak oryginalna strona
+    # 2 MiB z mapRegion2M) dla wszystkich stron OPRÓCZ tej, którą zaraz
+    # wybijemy.
+    let hugePhysBase = pde[i2] and 0xFFFFFFFFFFE00000'u64
+    let newPtPhys = allocPageAligned(bs, 1)
+    let newPte = entriesOf(newPtPhys)
+    for k in 0 ..< 512:
+      let pageAddr = hugePhysBase + uint64(k) * PageSize4K
+      newPte[k] = (pageAddr and 0xFFFFFFFFFFFFF000'u64) or PtPresent or PtWritable
+    pde[i2] = (newPtPhys and 0xFFFFFFFFFFFFF000'u64) or PtPresent or PtWritable
+
+  # Po ewentualnej democji pde[i2] wskazuje na świeżą tablicę PT (4 KiB)
+  # -- odczyt PONOWNY, bo wpis mógł się właśnie zmienić powyżej.
+  let ptPhys = pde[i2] and 0xFFFFFFFFFFFFF000'u64
+  let pte = entriesOf(ptPhys)
+  pte[ptIndex(virt)] = 0'u64 # not present: kazdy dostep do tej strony to #PF
 
 proc activate*(pt: PageTables) =
   ## Ładuje CR3 nowymi tablicami stron. UEFI na x86_64 już działa w long
