@@ -6,21 +6,27 @@ import ./state
 import ./vars
 
 proc runLine*(line: string): int =
-  let tokens = tokenize(line)
-  let statements = splitStatements(tokens)
+  let rawStatements = splitRawStatements(line)
 
   var code = 0
   var skipDueToShortCircuit = false
 
-  for stmt in statements:
+  for rawStmt in rawStatements:
     if skipDueToShortCircuit:
       skipDueToShortCircuit = false
       continue
 
-    code = runPipeline(stmt)
-    lastExitCode = code
+    # Tokenizacja (i tym samym rozwinięcie $VAR/$?/$(...)) NASTĘPUJE TUTAJ,
+    # osobno dla KAŻDEJ instrukcji, tuż przed jej wykonaniem -- dzięki temu
+    # np. `false; echo $?` widzi kod wyjścia `false` (poprzedniej instrukcji
+    # z TEJ SAMEJ linii), a nie kod sprzed całej linii. Patrz obszerny
+    # komentarz przy parser.splitRawStatements.
+    let tokens = tokenize(rawStmt.text)
+    for stmt in splitStatements(tokens):
+      code = runPipeline(stmt)
+      lastExitCode = code
 
-    case stmt.sepAfter
+    case rawStmt.sep
     of sepAnd:
       # `&&`: następna instrukcja wykonuje się tylko, gdy ta się powiodła.
       skipDueToShortCircuit = (code != 0)
