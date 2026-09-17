@@ -83,3 +83,5 @@ targets:
     main: tools/up/src/up.cr
   ni:
     main: tools/ni/src/ni.cr
+  zsrvctl:
+    main: tools/zsrvctl/src/zsrvctl.cr
