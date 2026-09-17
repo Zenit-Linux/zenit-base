@@ -13,12 +13,15 @@ def pid_exists?(pid : Int32) : Bool
   LibZb.kill(pid, 0) == 0
 end
 
-# zb — nowoczesna alternatywa dla `kill` (Zenit Linux, "zabij")
+# zb — nowoczesna alternatywa dla `kill`/`pkill` (Zenit Linux, "zabij")
 #
-# STATUS: szkielet+ — wysyłanie sygnałów po PID działa, wraz z
-# --timeout (najpierw SIGTERM, a po limicie czasu SIGKILL, jeśli proces
-# wciąż działa). Dopasowanie po nazwie procesu (jak `pkill`) pozostaje
-# jako TODO.
+# STATUS: wysyłanie sygnałów po PID działa, wraz z --timeout (najpierw
+# SIGTERM, a po limicie czasu SIGKILL, jeśli proces wciąż działa) oraz
+# dopasowaniem po NAZWIE procesu (jak `pkill`) — argument, który nie jest
+# liczbą, jest traktowany jako wzorzec (dopasowanie podciągu do
+# /proc/[pid]/comm), rozwijany do WSZYSTKICH pasujących PID-ów. Własny
+# proces `zb` jest zawsze wykluczony z dopasowania (ta sama ochrona przed
+# przypadkowym samobójstwem, co w GNU pkill).
 #
 # NAPRAWIONE (2x):
 #
@@ -101,22 +104,48 @@ if list_only
   exit 0
 end
 
+def pids_by_name(pattern : String) : Array(Int32)
+  # Dopasowanie PODCIĄGU (nie całego słowa) do /proc/[pid]/comm — tak jak
+  # domyślne (bez -f) dopasowanie w GNU pkill, tylko przeciwko nazwie
+  # procesu, nie pełnej linii poleceń.
+  result = [] of Int32
+  own_pid = Process.pid
+  return result unless Dir.exists?("/proc")
+  Dir.children("/proc").each do |entry|
+    next unless entry =~ /\A\d+\z/
+    pid = entry.to_i
+    next if pid == own_pid # nigdy nie dopasowuj samego siebie -- ochrona jak w pkill
+    comm_path = "/proc/#{entry}/comm"
+    next unless File.exists?(comm_path)
+    begin
+      comm = File.read(comm_path).strip
+      result << pid if comm.includes?(pattern)
+    rescue
+      next
+    end
+  end
+  result
+end
+
 pids = [] of Int32
 positional.each do |a|
   if pid = a.to_i?
     pids << pid
   else
-    STDERR.puts "zb: nieprawidłowy PID: '#{a}'"
+    matched = pids_by_name(a)
+    if matched.empty?
+      STDERR.puts "zb: brak procesów pasujących do nazwy '#{a}'"
+    else
+      pids.concat(matched)
+    end
   end
 end
+pids.uniq!
 
 if pids.empty?
   STDERR.puts "zb: brak argumentu — podaj co najmniej jeden PID"
   exit 1
 end
-
-# TODO: dopasowanie po nazwie procesu przez przeszukanie /proc/[pid]/comm
-# (odpowiednik `pkill NAZWA`).
 
 exit_code = 0
 
