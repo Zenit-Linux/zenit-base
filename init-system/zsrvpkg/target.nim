@@ -3,27 +3,61 @@ import ./types
 import ./state
 import ./logger
 
+proc parseCmdlineTokens(s: string): seq[string] =
+  ## Dzieli zawartość `/proc/cmdline` na tokeny zgodnie z konwencją jądra
+  ## Linuksa: tokeny są rozdzielone spacjami, ale wartość PO `=` może być
+  ## ujęta w cudzysłów, żeby zawierać spacje (np.
+  ## `BOOT_IMAGE=/vmlinuz root=/dev/sda1 zsrv.target="multi-user"` albo,
+  ## bardziej praktycznie, coś w stylu `foo="bar baz"`) -- naiwny
+  ## `splitWhitespace()` rozbiłby taką cudzysłowioną wartość na dwa
+  ## osobne tokeny.
+  result = @[]
+  var current = ""
+  var inQuotes = false
+  var i = 0
+  while i < s.len:
+    let c = s[i]
+    if c == '"':
+      inQuotes = not inQuotes
+      inc i
+    elif (c == ' ' or c == '\t') and not inQuotes:
+      if current.len > 0:
+        result.add(current)
+        current = ""
+      inc i
+    else:
+      current &= c
+      inc i
+  if current.len > 0:
+    result.add(current)
+
+proc parseTargetToken(value: string): Target =
+  case value
+  of "rescue": tgRescue
+  of "multi-user": tgMultiUser
+  else:
+    log("zsrv: nieznany target: '" & value & "'")
+    tgMultiUser
+
 proc detectTargetFromCmdline*(): Target =
-  ## Odczytuje `/proc/cmdline` w poszukiwaniu `zsrv.target=...`, z
-  ## fallbackiem na argument programu, a domyślnie `multi-user`.
-  ## TODO: pełny parser cmdline (dziś prosty `split`/`startsWith`).
+  ## Odczytuje `/proc/cmdline` w poszukiwaniu `zsrv.target=...` (z pełnym
+  ## wsparciem dla cudzysłowionych wartości, patrz `parseCmdlineTokens`),
+  ## z fallbackiem na argumenty programu (skanowane WSZYSTKIE, nie tylko
+  ## pierwszy -- `zsrv --debug --target=rescue` musiało by wcześniej
+  ## trafić dokładnie jako pierwszy argument, inaczej fallback cicho nie
+  ## zadziałał), a domyślnie `multi-user`.
   try:
     let cmdline = readFile("/proc/cmdline")
-    for token in cmdline.splitWhitespace():
+    for token in parseCmdlineTokens(cmdline):
       if token.startsWith("zsrv.target="):
-        let value = token.split('=', 1)[1]
-        case value
-        of "rescue": return tgRescue
-        of "multi-user": return tgMultiUser
-        else: log("zsrv: nieznany target w /proc/cmdline: '" & value & "'")
+        return parseTargetToken(token.split('=', 1)[1])
   except IOError:
     discard # /proc może nie być jeszcze zamontowane — nie jest to błąd krytyczny
 
-  if paramCount() >= 1 and paramStr(1).startsWith("--target="):
-    case paramStr(1).split('=', 1)[1]
-    of "rescue": return tgRescue
-    of "multi-user": return tgMultiUser
-    else: discard
+  for i in 1 .. paramCount():
+    let arg = paramStr(i)
+    if arg.startsWith("--target="):
+      return parseTargetToken(arg.split('=', 1)[1])
 
   tgMultiUser
 
