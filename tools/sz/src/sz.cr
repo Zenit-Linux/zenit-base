@@ -2,8 +2,9 @@ require "option_parser"
 
 # sz — nowoczesna alternatywa dla `grep` (Zenit Linux)
 #
-# STATUS: rozbudowany szkielet — dodano kontekst (-A/-B/-C) i kolorowanie
-# dopasowanego fragmentu. -l/-L (tylko nazwy plików) pozostaje jako TODO.
+# STATUS: rozbudowany szkielet — kontekst (-A/-B/-C), kolorowanie
+# dopasowanego fragmentu, -l/-L (tylko nazwy plików) i prawdziwe -r
+# (rekurencyjne wejście do katalogów, nie tylko flaga bez efektu).
 
 VERSION = "0.1.0"
 
@@ -14,17 +15,21 @@ count_only   = false
 recursive    = false
 fixed_string = false
 no_color     = false
+files_with_matches    = false
+files_without_matches = false
 context_before = 0
 context_after  = 0
 args         = [] of String
 
 parser = OptionParser.new do |p|
-  p.banner = "sz — nowoczesna alternatywa dla grep (Zenit Linux)\n\nUżycie: sz [opcje] WZORZEC [PLIK...]"
+  p.banner = "sz — nowoczesna alternatywa dla grep (Zenit Linux)\n\nUżycie: sz [opcje] WZORZEC [PLIK|KATALOG...]"
   p.on("-i", "--ignore-case", "ignoruj wielkość liter") { ignore_case = true }
   p.on("-v", "--invert-match", "wypisz linie NIE pasujące do wzorca") { invert = true }
   p.on("-n", "--line-number", "poprzedzaj dopasowania numerem linii") { line_number = true }
   p.on("-c", "--count", "wypisz tylko liczbę dopasowań") { count_only = true }
   p.on("-r", "--recursive", "przeszukuj katalogi rekurencyjnie") { recursive = true }
+  p.on("-l", "--files-with-matches", "wypisz tylko nazwy plików Z co najmniej jednym dopasowaniem") { files_with_matches = true }
+  p.on("-L", "--files-without-match", "wypisz tylko nazwy plików BEZ żadnego dopasowania") { files_without_matches = true }
   p.on("-F", "--fixed-strings", "traktuj wzorzec jako zwykły tekst, nie regex") { fixed_string = true }
   p.on("-A NUM", "--after-context=NUM", "pokaż NUM linii po dopasowaniu") { |v| context_after = v.to_i }
   p.on("-B NUM", "--before-context=NUM", "pokaż NUM linii przed dopasowaniem") { |v| context_before = v.to_i }
@@ -42,11 +47,30 @@ if args.empty?
 end
 
 pattern_str = args.shift
-files       = args
-use_color   = !no_color && STDOUT.tty? && !count_only
+raw_paths   = args
+list_names_only = files_with_matches || files_without_matches
+use_color   = !no_color && STDOUT.tty? && !count_only && !list_names_only
 
-# TODO: obsługa -l/-L (tylko nazwy plików z/bez dopasowań)
-# TODO: rekurencyjne przeszukiwanie katalogów, gdy -r i argument to katalog
+# Rozwija argumenty będące katalogami na listę ZWYKŁYCH plików w nich
+# (rekurencyjnie, jeśli -r) -- bez tego `-r` było przyjmowane jako opcja,
+# ale nigdy faktycznie nie wchodziło do podanego katalogu.
+def expand_paths(raw_paths : Array(String), recursive : Bool) : Array(String)
+  result = [] of String
+  raw_paths.each do |p|
+    if File.directory?(p)
+      unless recursive
+        STDERR.puts "sz: '#{p}' jest katalogiem (użyj -r, żeby przeszukać rekurencyjnie)"
+        next
+      end
+      Dir.glob(File.join(p, "**", "*")).each do |entry|
+        result << entry if File.file?(entry)
+      end
+    else
+      result << p
+    end
+  end
+  result
+end
 
 regex = if fixed_string
           Regex.new(Regex.escape(pattern_str), ignore_case ? Regex::Options::IGNORE_CASE : Regex::Options::None)
@@ -61,7 +85,7 @@ end
 
 def search_io(io : IO, label : String?, regex : Regex, invert : Bool,
               line_number : Bool, count_only : Bool, context_before : Int32,
-              context_after : Int32, use_color : Bool) : Int32
+              context_after : Int32, use_color : Bool, list_names_only : Bool) : Int32
   matches = 0
   lines = io.each_line.to_a
   matched_indices = [] of Int32
@@ -72,10 +96,11 @@ def search_io(io : IO, label : String?, regex : Regex, invert : Bool,
     if is_match
       matches += 1
       matched_indices << idx.to_i32
+      break if list_names_only # -l/-L: tylko fakt istnienia dopasowania się liczy
     end
   end
 
-  return matches if count_only
+  return matches if count_only || list_names_only
 
   # Zbiór indeksów do wypisania: dopasowania + kontekst przed/po.
   to_print = Set(Int32).new
@@ -105,19 +130,26 @@ end
 
 total_matches = 0
 
-if files.empty?
+if raw_paths.empty?
   total_matches += search_io(STDIN, nil, regex, invert, line_number, count_only,
-                              context_before, context_after, use_color)
+                              context_before, context_after, use_color, list_names_only)
 else
+  files = expand_paths(raw_paths, recursive)
   files.each do |f|
     unless File.exists?(f)
       STDERR.puts "sz: nie można otworzyć '#{f}': nie istnieje"
       next
     end
-    label = files.size > 1 ? f : nil
-    File.open(f) do |io|
-      total_matches += search_io(io, label, regex, invert, line_number, count_only,
-                                  context_before, context_after, use_color)
+    label = files.size > 1 || list_names_only ? f : nil
+    file_matches = File.open(f) do |io|
+      search_io(io, label, regex, invert, line_number, count_only,
+                context_before, context_after, use_color, list_names_only)
+    end
+    total_matches += file_matches
+    if files_with_matches
+      puts f if file_matches > 0
+    elsif files_without_matches
+      puts f if file_matches == 0
     end
   end
 end
