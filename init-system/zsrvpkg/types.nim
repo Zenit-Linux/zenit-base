@@ -27,6 +27,7 @@ type
     user*:       string       # nazwa użytkownika do setuid/setgid (opcjonalnie)
     limits*:     ResourceLimits
     stopSec*:    int          # limit czasu na reakcję na SIGTERM przed SIGKILL
+    environment*: seq[string] # dodatkowe zmienne środowiskowe procesu, "KLUCZ=WARTOSC"
 
   ServiceRuntime* = object
     def*:          ServiceDef
@@ -36,6 +37,17 @@ type
     restartCount*: int
     restartAt*:    Time # kiedy uruchomić ponownie po awarii (jeśli oczekuje)
     stopDeadline*: Time # kiedy wysłać SIGKILL, jeśli usługa nie zareagowała na SIGTERM
+    stoppedByAdmin*: bool # true = zatrzymana JAWNIE (zsrvctl stop / stary mechanizm)
+      ## Odróżnia "administracyjnie zatrzymana, ma zostać zatrzymana" od
+      ## zwykłego "jeszcze nie wystartowana / czeka na zależność" -- bez
+      ## tego pola cykliczne wywołanie `applyTarget` w pętli zdarzeń
+      ## (zsrvpkg/eventloop, co każdy obrót pętli — łapie usługi, których
+      ## zależności się właśnie spełniły) natychmiast z powrotem
+      ## uruchamiało KAŻDĄ usługę zatrzymaną przez `zsrvctl stop`, jeśli
+      ## nadal należała do aktywnego targetu — w praktyce `stop`
+      ## przestawał działać w mniej niż sekundę. Ustawiane w `stopService`,
+      ## czyszczone w `startService` (jawny `start` zawsze wygrywa) — patrz
+      ## `applyTarget`'s parametr `force`.
 
 proc newResourceLimits*(memoryMaxBytes: int64 = 0, cpuQuotaPercent: int32 = 0): ResourceLimits =
   ResourceLimits(memoryMaxBytes: memoryMaxBytes, cpuQuotaPercent: cpuQuotaPercent)
