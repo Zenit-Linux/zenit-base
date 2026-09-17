@@ -7,9 +7,31 @@ proc runBuiltin*(cmd: string, args: seq[string]): (bool, int) =
   ## Zwraca (obsłużone_jako_builtin, kod_wyjścia).
   case cmd
   of "cd":
-    let target = if args.len > 0: args[0] else: getHomeDir()
+    # `cd -` przełącza na poprzedni katalog roboczy ($OLDPWD, tak jak w
+    # bashu) i wypisuje nową ścieżkę -- dokładnie to, co bash robi po
+    # `cd -`, żeby było widać, dokąd się właśnie wróciło. Każde udane
+    # `cd` (obojętnie jakie) aktualizuje $OLDPWD/$PWD, żeby `cd -`
+    # działało poprawnie także po kolejnych `cd`, oraz żeby skrypty
+    # mogły polegać na $PWD tak jak w prawdziwej powłoce POSIX.
+    let previousDir = getCurrentDir()
+    var target: string
+    if args.len == 0:
+      target = getHomeDir()
+    elif args[0] == "-":
+      if not existsEnv("OLDPWD"):
+        stderr.styledWriteLine(fgRed, "zesh: cd: OLDPWD nie jest ustawione")
+        return (true, 1)
+      target = getEnv("OLDPWD")
+    else:
+      target = args[0]
+
     try:
       setCurrentDir(target)
+      let newDir = getCurrentDir()
+      putEnv("OLDPWD", previousDir)
+      putEnv("PWD", newDir)
+      if args.len > 0 and args[0] == "-":
+        echo newDir
       return (true, 0)
     except OSError as e:
       stderr.styledWriteLine(fgRed, "zesh: cd: ", e.msg)
@@ -67,12 +89,49 @@ proc runBuiltin*(cmd: string, args: seq[string]): (bool, int) =
     let id = spec.parseInt()
     waitForJob(id)
     return (true, 0)
+  of "bg":
+    if args.len == 0:
+      stderr.writeLine("zesh: bg: brak numeru zadania (użyj: bg %N)")
+      return (true, 1)
+    let spec = args[0].strip(chars = {'%'})
+    let id = spec.parseInt()
+    let ok = continueJobBg(id)
+    return (true, if ok: 0 else: 1)
+  of "read":
+    # `read var1 var2 ... varN` -- czyta JEDNĄ linię ze stdin i dzieli ją
+    # na słowa (białe znaki): pierwsze N-1 słów trafia do pierwszych N-1
+    # zmiennych, a WSZYSTKO, co zostanie (łącznie z ewentualnymi
+    # dodatkowymi spacjami) -- do OSTATNIEJ zmiennej, dokładnie tak jak w
+    # bashu (`read a b` przy wejściu "x y z" daje a=x, b="y z"). Brak
+    # nazwy zmiennej -> domyślnie `REPLY` (konwencja bash). Zabraknięcie
+    # słów dla którejś zmiennej zostawia ją jako pusty tekst. EOF (brak
+    # linii do odczytania) zwraca kod 1, tak jak w bashu.
+    let varNames = if args.len > 0: args else: @["REPLY"]
+    var line: string
+    try:
+      line = readLine(stdin)
+    except EOFError:
+      for name in varNames:
+        localVars[name] = ""
+      return (true, 1)
+
+    let words = line.splitWhitespace()
+    for i, name in varNames:
+      if i == varNames.len - 1:
+        # Ostatnia zmienna zbiera resztę -- łączymy pozostałe słowa
+        # pojedynczą spacją (upraszczamy sobie życie względem bashowego
+        # zachowania "oryginalne białe znaki", co i tak rzadko ma
+        # znaczenie w praktyce skryptowej).
+        localVars[name] = (if i < words.len: words[i ..< words.len].join(" ") else: "")
+      else:
+        localVars[name] = (if i < words.len: words[i] else: "")
+    return (true, 0)
   of "type":
     for a in args:
       if aliases.hasKey(a):
         echo a & " to alias dla '" & aliases[a] & "'"
       elif a in ["cd", "pwd", "exit", "export", "unset", "history", "alias",
-                 "unalias", "jobs", "fg", "type"]:
+                 "unalias", "jobs", "fg", "bg", "read", "type"]:
         echo a & " jest poleceniem wbudowanym zesh"
       else:
         let path = findExe(a)
