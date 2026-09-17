@@ -11,9 +11,13 @@ require "./disasm"
 # po kroku, podgląd/zmianę rejestrów i pamięci, prosty backtrace przez
 # łańcuch RBP (z nazwami symboli), oraz podstawową deasemblację
 # (disasm.cr — poprawna długość instrukcji, ale bez pełnych operandów).
-# Podłączanie się do już działającego procesu (PTRACE_ATTACH —
-# zadeklarowane, ale niepodłączone do żadnej komendy) i demangling C++
-# pozostają jako TODO.
+# Podłączanie się do już działającego procesu przez PTRACE_ATTACH
+# (polecenie `attach PID`, patrz Debuggee#attach) jest zaimplementowane.
+# Demangling C++ (nazwy symboli C++ w formie `_ZN...`) obsłużony przez
+# demangle.cr — podzbiór Itanium C++ ABI (nazwy zagnieżdżone, ctor/dtor,
+# wskaźniki/referencje/const, tabela podstawień), zweryfikowany przeciwko
+# `c++filt`; szablony i przeciążone operatory świadomie poza zakresem
+# (wracają niezdemanglowane zamiast błędnego wyniku).
 #
 # Użycie:
 #   zdb PROGRAM [ARGUMENTY...]     — uruchamia sesję debugowania od razu
@@ -121,6 +125,36 @@ class Debuggee
     LibZdb.waitpid(pid, pointerof(status), 0) # czekaj na pierwszy SIGTRAP (po execve)
     @running = true
     puts "zdb: uruchomiono '#{command.join(" ")}' jako pid #{pid} (zatrzymany na wejściu)"
+  end
+
+  def attach(pid : Int32)
+    # PTRACE_ATTACH: podłącz się do JUŻ DZIAŁAJĄCEGO procesu (jak `gdb -p
+    # PID`), zamiast uruchamiać nowy przez fork+execvp jak `start` powyżej.
+    # Jądro wysyła procesowi SIGSTOP i zatrzymuje go — czekamy na to przez
+    # waitpid, dokładnie tak samo jak na pierwszy SIGTRAP po execve w `start`.
+    ret = LibZdb.ptrace(LibZdb::PTRACE_ATTACH, pid, Pointer(Void).null, Pointer(Void).null)
+    if ret != 0
+      puts "zdb: nie można podłączyć się do PID #{pid} (proces nie istnieje albo brak uprawnień -- wymaga roota lub tego samego użytkownika + CAP_SYS_PTRACE)"
+      return
+    end
+
+    @pid = pid
+    status = 0
+    LibZdb.waitpid(pid, pointerof(status), 0)
+    @running = true
+
+    # Symbole z faktycznego pliku wykonywalnego procesu, przez /proc/[pid]/exe
+    # (dowiązanie symboliczne do binarki, z jaką proces został uruchomiony —
+    # działa nawet jeśli oryginalny plik na dysku został od tamtej pory
+    # podmieniony/usunięty, bo jądro trzyma otwarty deskryptor).
+    exe_path = "/proc/#{pid}/exe"
+    if File.exists?(exe_path)
+      @program_path = (File.readlink(exe_path) rescue exe_path)
+      @symbols = (ElfSymbols.load(exe_path) rescue [] of ElfSymbols::Symbol)
+      puts "zdb: wczytano #{@symbols.size} symboli z '#{@program_path}'" unless @symbols.empty?
+    end
+
+    puts "zdb: podłączono do PID #{pid} (zatrzymany)"
   end
 
   def peek_word(addr : UInt64) : UInt64
@@ -272,7 +306,7 @@ class Debuggee
       return
     end
     symbols.each do |s|
-      puts "0x#{s.addr.to_s(16).rjust(16, '0')}  #{s.size.to_s.rjust(8)}  #{s.name}"
+      puts "0x#{s.addr.to_s(16).rjust(16, '0')}  #{s.size.to_s.rjust(8)}  #{Demangle.demangle(s.name)}"
     end
   end
 
@@ -287,6 +321,7 @@ def print_help
   puts <<-HELP
   Dostępne polecenia:
     run PROGRAM [ARGI...]   uruchom i zacznij śledzić program
+    attach PID               podłącz się do JUŻ działającego procesu (PTRACE_ATTACH)
     break ADRES (b)          ustaw punkt przerwania pod adresem szesnastkowym (np. break 0x401020)
     continue (c)              wznów wykonanie do następnego punktu przerwania
     step (s)                    wykonaj jedną instrukcję
@@ -336,6 +371,12 @@ loop do
       puts "zdb: użycie: run PROGRAM [ARGI...]"
     else
       debuggee.start(parts[1..])
+    end
+  when "attach"
+    if parts.size != 2 || !parts[1].to_i?
+      puts "zdb: użycie: attach PID"
+    else
+      debuggee.attach(parts[1].to_i)
     end
   when "break", "b"
     if parts.size < 2
