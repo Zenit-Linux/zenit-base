@@ -31,7 +31,7 @@ def find_all(name : String) : Array(String)
   path_env = ENV["PATH"]? || ""
   path_env.split(':', remove_empty: true).each do |dir|
     candidate = File.join(dir, name)
-    if File.exists?(candidate) && !File.directory?(candidate) && File::Info.executable?(candidate)
+    if File.exists?(candidate) && !File.directory?(candidate) && File.executable?(candidate)
       found << candidate
     end
   end
